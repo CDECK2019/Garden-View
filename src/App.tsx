@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { 
   Layout, 
   Calculator, 
@@ -14,49 +14,162 @@ import {
   Trash2,
   Plus,
   DollarSign,
-  MapPin
+  MapPin,
+  ZoomIn,
+  ZoomOut,
+  Maximize,
+  MoveHorizontal,
+  Camera,
+  History,
+  Save,
+  Grid,
+  FolderOpen,
+  Clock,
+  Hand,
+  Crop,
+  RotateCw,
+  BoxSelect,
+  Check,
+  RefreshCw,
+  ArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { editLandscapeImage, generateInitialLandscape } from './services/geminiService';
-import { Material, ProjectData, DEFAULT_MATERIALS } from './types';
+import { Material, DEFAULT_MATERIALS, ImageAngle, Project, ProjectVersion } from './types';
 import Markdown from 'react-markdown';
+import Cropper, { Area, Point } from 'react-easy-crop';
 
-type ViewMode = 'design' | 'business';
+function Tooltip({ children, text }: { children: React.ReactNode; text: string }) {
+  return (
+    <div className="group relative inline-block">
+      {children}
+      <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-1.5 bg-neutral-800 text-white text-[10px] font-bold rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-200 pointer-events-none whitespace-nowrap border border-neutral-700 shadow-xl z-[60] translate-y-1 group-hover:translate-y-0">
+        {text}
+        <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-neutral-800" />
+      </div>
+    </div>
+  );
+}
+
+type ViewMode = 'dashboard' | 'design' | 'business';
 
 export default function App() {
-  const [viewMode, setViewMode] = useState<ViewMode>('design');
-  const [currentImage, setCurrentImage] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [zoomLevel, setZoomLevel] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
   const [isChatOpen, setIsChatOpen] = useState(true);
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  // Business State
-  const [projectData, setProjectData] = useState<ProjectData>({
-    zipCode: '',
-    materials: [...DEFAULT_MATERIALS],
-    laborRate: 65,
-    laborHours: 0
-  });
-
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Image Manipulation State
+  const [activeTool, setActiveTool] = useState<'select' | 'hand' | 'crop' | 'perspective'>('select');
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [rotation, setRotation] = useState({ x: 0, y: 0 });
+  
+  // Cropping State
+  const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
+  const [cropZoom, setCropZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
+
+  const activeProject = projects.find(p => p.id === activeProjectId);
+  const currentVersion = activeProject?.versions.find(v => v.id === activeProject.currentVersionId);
+  
+  const images = currentVersion?.images || [];
+  const currentImage = images[activeIndex]?.url || null;
+
+  const createProject = (name: string, description: string) => {
+    const newVersion: ProjectVersion = {
+      id: Math.random().toString(36).substr(2, 9),
+      name: 'Initial Version',
+      timestamp: Date.now(),
+      images: [],
+      materials: [...DEFAULT_MATERIALS],
+      laborRate: 65,
+      laborHours: 0
+    };
+    const newProject: Project = {
+      id: Math.random().toString(36).substr(2, 9),
+      name,
+      description,
+      zipCode: '',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      versions: [newVersion],
+      currentVersionId: newVersion.id
+    };
+    setProjects(prev => [...prev, newProject]);
+    setActiveProjectId(newProject.id);
+    setViewMode('design');
+  };
+
+  const saveVersion = (name: string) => {
+    if (!activeProject || !currentVersion) return;
+    const newVersion: ProjectVersion = {
+      ...currentVersion,
+      id: Math.random().toString(36).substr(2, 9),
+      name,
+      timestamp: Date.now()
+    };
+    setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+      ...p,
+      versions: [...p.versions, newVersion],
+      currentVersionId: newVersion.id,
+      updatedAt: Date.now()
+    } : p));
+  };
+
+  const switchVersion = (versionId: string) => {
+    setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+      ...p,
+      currentVersionId: versionId
+    } : p));
+    setActiveIndex(0);
+    setZoomLevel(1);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        setCurrentImage(event.target?.result as string);
-        setMessages([{ role: 'ai', content: "I've uploaded your property photo. What design changes would you like to explore? You can ask for things like 'add a stone patio', 'replace the lawn with drought-tolerant plants', or 'add a modern retaining wall'." }]);
-      };
-      reader.readAsDataURL(file);
+    if (!activeProjectId || !currentVersion) return;
+    const files = e.target.files;
+    if (files) {
+      Array.from(files).forEach((file, index) => {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const newImage: ImageAngle = {
+            id: Math.random().toString(36).substr(2, 9),
+            url: event.target?.result as string,
+            name: `Angle ${images.length + index + 1}`,
+            timestamp: Date.now()
+          };
+          
+          setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+            ...p,
+            versions: p.versions.map(v => v.id === p.currentVersionId ? {
+              ...v,
+              images: [...v.images, newImage]
+            } : v)
+          } : p));
+
+          if (images.length === 0 && index === 0) {
+            setMessages([{ role: 'ai', content: "I've uploaded your property photos. You can switch between angles using the gallery below. What design changes would you like to explore?" }]);
+          }
+        };
+        reader.readAsDataURL(file);
+      });
     }
   };
 
   const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isProcessing) return;
+    if (!inputMessage.trim() || isProcessing || !activeProjectId || !currentVersion) return;
 
     const userMsg = inputMessage.trim();
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
@@ -65,22 +178,35 @@ export default function App() {
 
     try {
       if (!currentImage) {
-        // Generate initial image if none exists
         const result = await generateInitialLandscape(userMsg);
         if (result.imageUrl) {
-          setCurrentImage(result.imageUrl);
+          const newImage: ImageAngle = {
+            id: Math.random().toString(36).substr(2, 9),
+            url: result.imageUrl,
+            name: 'Initial Design',
+            timestamp: Date.now()
+          };
+          setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+            ...p,
+            versions: p.versions.map(v => v.id === p.currentVersionId ? {
+              ...v,
+              images: [newImage]
+            } : v)
+          } : p));
+          setActiveIndex(0);
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "Here is a design based on your description." }]);
-        } else {
-          setMessages(prev => [...prev, { role: 'ai', content: "I couldn't generate an image. Please try a different description." }]);
         }
       } else {
-        // Edit existing image
         const result = await editLandscapeImage(currentImage, userMsg);
         if (result.imageUrl) {
-          setCurrentImage(result.imageUrl);
-          setMessages(prev => [...prev, { role: 'ai', content: result.text || "I've updated the design according to your request." }]);
-        } else {
-          setMessages(prev => [...prev, { role: 'ai', content: "I encountered an error updating the image. Please try again." }]);
+          setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+            ...p,
+            versions: p.versions.map(v => v.id === p.currentVersionId ? {
+              ...v,
+              images: v.images.map((img, i) => i === activeIndex ? { ...img, url: result.imageUrl } : img)
+            } : v)
+          } : p));
+          setMessages(prev => [...prev, { role: 'ai', content: result.text || "I've updated the design for this angle." }]);
         }
       }
     } catch (error) {
@@ -92,16 +218,83 @@ export default function App() {
   };
 
   const updateMaterialQuantity = (id: string, quantity: number) => {
-    setProjectData(prev => ({
-      ...prev,
-      materials: prev.materials.map(m => m.id === id ? { ...m, quantity } : m)
-    }));
+    setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+      ...p,
+      versions: p.versions.map(v => v.id === p.currentVersionId ? {
+        ...v,
+        materials: v.materials.map(m => m.id === id ? { ...m, quantity } : m)
+      } : v)
+    } : p));
   };
 
   const calculateTotal = () => {
-    const materialsTotal = projectData.materials.reduce((sum, m) => sum + (m.unitPrice * m.quantity), 0);
-    const laborTotal = projectData.laborRate * projectData.laborHours;
+    if (!currentVersion) return 0;
+    const materialsTotal = currentVersion.materials.reduce((sum, m) => sum + (m.unitPrice * m.quantity), 0);
+    const laborTotal = currentVersion.laborRate * currentVersion.laborHours;
     return materialsTotal + laborTotal;
+  };
+
+  const onCropComplete = useCallback((_croppedArea: Area, croppedAreaPixels: Area) => {
+    setCroppedAreaPixels(croppedAreaPixels);
+  }, []);
+
+  const applyCrop = async () => {
+    if (!currentImage || !croppedAreaPixels || !activeProjectId || !currentVersion) return;
+    
+    try {
+      const canvas = document.createElement('canvas');
+      const img = new Image();
+      img.src = currentImage;
+      await new Promise((resolve) => (img.onload = resolve));
+      
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      
+      canvas.width = croppedAreaPixels.width;
+      canvas.height = croppedAreaPixels.height;
+      
+      ctx.drawImage(
+        img,
+        croppedAreaPixels.x,
+        croppedAreaPixels.y,
+        croppedAreaPixels.width,
+        croppedAreaPixels.height,
+        0,
+        0,
+        croppedAreaPixels.width,
+        croppedAreaPixels.height
+      );
+      
+      const croppedImageUrl = canvas.toDataURL('image/jpeg');
+      
+      setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+        ...p,
+        versions: p.versions.map(v => v.id === p.currentVersionId ? {
+          ...v,
+          images: v.images.map((img, i) => i === activeIndex ? { ...img, url: croppedImageUrl } : img)
+        } : v)
+      } : p));
+      
+      setActiveTool('select');
+      setCrop({ x: 0, y: 0 });
+      setCropZoom(1);
+    } catch (e) {
+      console.error('Failed to crop image', e);
+    }
+  };
+
+  const handleZoom = (delta: number) => {
+    setZoomLevel(prev => Math.min(Math.max(prev + delta, 1), 5));
+  };
+
+  const nextAngle = () => {
+    setActiveIndex(prev => (prev + 1) % images.length);
+    setZoomLevel(1);
+  };
+
+  const prevAngle = () => {
+    setActiveIndex(prev => (prev - 1 + images.length) % images.length);
+    setZoomLevel(1);
   };
 
   return (
@@ -120,9 +313,20 @@ export default function App() {
 
         <nav className="flex bg-neutral-800 p-1 rounded-xl">
           <button 
-            onClick={() => setViewMode('design')}
+            onClick={() => setViewMode('dashboard')}
             className={cn(
               "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200",
+              viewMode === 'dashboard' ? "bg-emerald-600 text-white shadow-md" : "text-neutral-400 hover:text-neutral-200"
+            )}
+          >
+            <FolderOpen size={18} />
+            <span className="text-sm font-medium">Dashboard</span>
+          </button>
+          <button 
+            disabled={!activeProjectId}
+            onClick={() => setViewMode('design')}
+            className={cn(
+              "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed",
               viewMode === 'design' ? "bg-emerald-600 text-white shadow-md" : "text-neutral-400 hover:text-neutral-200"
             )}
           >
@@ -130,9 +334,10 @@ export default function App() {
             <span className="text-sm font-medium">Design Studio</span>
           </button>
           <button 
+            disabled={!activeProjectId}
             onClick={() => setViewMode('business')}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200",
+              "flex items-center gap-2 px-4 py-2 rounded-lg transition-all duration-200 disabled:opacity-30 disabled:cursor-not-allowed",
               viewMode === 'business' ? "bg-emerald-600 text-white shadow-md" : "text-neutral-400 hover:text-neutral-200"
             )}
           >
@@ -146,102 +351,463 @@ export default function App() {
             <span className="text-xs text-neutral-500 uppercase font-mono">Project Total</span>
             <span className="text-lg font-bold text-emerald-400">${calculateTotal().toLocaleString()}</span>
           </div>
-          <button className="p-2 rounded-full bg-neutral-800 hover:bg-neutral-700 transition-colors">
-            <Download size={20} className="text-neutral-300" />
-          </button>
+          <Tooltip text="Download Project Report">
+            <button className="p-2 rounded-full bg-neutral-800 hover:bg-neutral-700 transition-colors">
+              <Download size={20} className="text-neutral-300" />
+            </button>
+          </Tooltip>
         </div>
       </header>
 
       {/* Main Content */}
       <main className="flex-1 flex overflow-hidden relative">
-        {viewMode === 'design' ? (
-          <>
-            {/* Design Canvas */}
-            <div className="flex-1 relative bg-neutral-900 overflow-hidden flex items-center justify-center">
-              {currentImage ? (
-                <div className="relative w-full h-full flex items-center justify-center p-8">
-                  <div className="relative max-w-full max-h-full shadow-2xl rounded-lg overflow-hidden border border-neutral-700">
-                    <img 
-                      src={currentImage} 
-                      alt="Landscape View" 
-                      className="max-w-full max-h-full object-contain"
-                      referrerPolicy="no-referrer"
-                    />
-                    
-                    {/* Grid Overlay */}
-                    <AnimatePresence>
-                      {showGrid && (
-                        <motion.div 
-                          initial={{ opacity: 0 }}
-                          animate={{ opacity: 0.3 }}
-                          exit={{ opacity: 0 }}
-                          className="absolute inset-0 pointer-events-none"
-                          style={{
-                            backgroundImage: `linear-gradient(to right, #ffffff11 1px, transparent 1px), linear-gradient(to bottom, #ffffff11 1px, transparent 1px)`,
-                            backgroundSize: '40px 40px'
-                          }}
-                        />
-                      )}
-                    </AnimatePresence>
+        {viewMode === 'dashboard' ? (
+          <div className="flex-1 bg-neutral-950 overflow-y-auto p-8">
+            <div className="max-w-6xl mx-auto space-y-8">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-3xl font-bold mb-1">Project Dashboard</h2>
+                  <p className="text-neutral-400">Manage your landscaping projects and design versions.</p>
+                </div>
+                <button 
+                  onClick={() => createProject(`New Project ${projects.length + 1}`, 'A new landscape design project.')}
+                  className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center gap-2"
+                >
+                  <Plus size={20} />
+                  New Project
+                </button>
+              </div>
 
-                    {/* Scale Reference */}
-                    <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded text-[10px] font-mono text-white/80 border border-white/10">
-                      GRID SCALE: 1 UNIT = 3 FT
-                    </div>
+              {projects.length === 0 ? (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-12 text-center flex flex-col items-center gap-4">
+                  <div className="w-20 h-20 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-700">
+                    <FolderOpen className="text-neutral-500 w-8 h-8" />
                   </div>
+                  <h3 className="text-xl font-bold">No Projects Yet</h3>
+                  <p className="text-neutral-400 max-w-sm">Create your first project to start visualizing and estimating your landscape designs.</p>
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-6 max-w-md text-center px-6">
-                  <div className="w-20 h-20 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-700">
-                    <Upload className="text-neutral-500 w-8 h-8" />
-                  </div>
-                  <div>
-                    <h2 className="text-2xl font-bold mb-2">Start Your Design</h2>
-                    <p className="text-neutral-400">Upload a photo of your property or describe it in the chat to begin your transformation.</p>
-                  </div>
-                  <div className="flex gap-4 w-full">
-                    <button 
-                      onClick={() => fileInputRef.current?.click()}
-                      className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2"
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                  {projects.map(project => (
+                    <div 
+                      key={project.id}
+                      className={cn(
+                        "bg-neutral-900 border rounded-3xl overflow-hidden transition-all group cursor-pointer",
+                        activeProjectId === project.id ? "border-emerald-500 ring-1 ring-emerald-500" : "border-neutral-800 hover:border-neutral-700"
+                      )}
+                      onClick={() => {
+                        setActiveProjectId(project.id);
+                        setViewMode('design');
+                      }}
                     >
-                      <Upload size={20} />
-                      Upload Photo
-                    </button>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      onChange={handleFileUpload} 
-                      className="hidden" 
-                      accept="image/*"
-                    />
-                  </div>
+                      <div className="h-40 bg-neutral-800 relative overflow-hidden">
+                        {project.versions[project.versions.length - 1]?.images[0] ? (
+                          <img 
+                            src={project.versions[project.versions.length - 1].images[0].url} 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            alt={project.name}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center text-neutral-600">
+                            <ImageIcon size={48} />
+                          </div>
+                        )}
+                        <div className="absolute top-4 right-4 bg-black/60 backdrop-blur-md px-2 py-1 rounded text-[10px] font-mono text-white/80 border border-white/10">
+                          {project.versions.length} VERSIONS
+                        </div>
+                      </div>
+                      <div className="p-6">
+                        <h4 className="text-lg font-bold mb-1">{project.name}</h4>
+                        <p className="text-xs text-neutral-500 mb-4 line-clamp-2">{project.description}</p>
+                        <div className="flex items-center justify-between text-[10px] font-mono text-neutral-500 uppercase tracking-widest">
+                          <span className="flex items-center gap-1"><Clock size={10} /> {new Date(project.updatedAt).toLocaleDateString()}</span>
+                          <span className="flex items-center gap-1"><MapPin size={10} /> {project.zipCode || 'No Zip'}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
-
-              {/* Canvas Controls */}
-              <div className="absolute bottom-6 left-6 flex gap-2">
-                <button 
-                  onClick={() => setShowGrid(!showGrid)}
-                  className={cn(
-                    "p-3 rounded-xl border transition-all flex items-center gap-2",
-                    showGrid 
-                      ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
-                      : "bg-neutral-800 border-neutral-700 text-neutral-400 hover:bg-neutral-700"
-                  )}
-                >
-                  <Grid3X3 size={20} />
-                  <span className="text-xs font-bold uppercase tracking-wider">Grid</span>
-                </button>
-                {currentImage && (
-                  <button 
-                    onClick={() => setCurrentImage(null)}
-                    className="p-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-400 hover:bg-red-900/30 hover:text-red-400 hover:border-red-900/50 transition-all flex items-center gap-2"
-                  >
-                    <Trash2 size={20} />
-                    <span className="text-xs font-bold uppercase tracking-wider">Clear</span>
-                  </button>
-                )}
+            </div>
+          </div>
+        ) : viewMode === 'design' ? (
+          <>
+            {/* Design Canvas */}
+            <div className="flex-1 relative bg-neutral-900 overflow-hidden flex flex-col">
+              {/* Version Selector */}
+              <div className="h-12 border-b border-neutral-800 bg-neutral-900/50 flex items-center px-4 justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-2 text-xs font-bold text-neutral-400">
+                    <History size={14} />
+                    <span>VERSION:</span>
+                    <select 
+                      value={activeProject?.currentVersionId}
+                      onChange={(e) => switchVersion(e.target.value)}
+                      className="bg-neutral-800 border border-neutral-700 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                    >
+                      {activeProject?.versions.map(v => (
+                        <option key={v.id} value={v.id}>{v.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <Tooltip text="Save current design as a new version">
+                    <button 
+                      onClick={() => {
+                        const name = prompt('Enter version name:', `Version ${activeProject!.versions.length + 1}`);
+                        if (name) saveVersion(name);
+                      }}
+                      className="flex items-center gap-1 text-[10px] font-bold text-emerald-500 hover:text-emerald-400 uppercase tracking-wider"
+                    >
+                      <Save size={12} /> Save Current
+                    </button>
+                  </Tooltip>
+                </div>
+                <div className="text-[10px] font-mono text-neutral-500">
+                  PROJECT: {activeProject?.name.toUpperCase()}
+                </div>
               </div>
+              <div className="flex-1 relative overflow-hidden flex items-center justify-center">
+                {currentImage ? (
+                  <div className="relative w-full h-full flex items-center justify-center p-8">
+                    {activeTool === 'crop' ? (
+                      <div className="relative w-full h-full bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-800">
+                        <Cropper
+                          image={currentImage}
+                          crop={crop}
+                          zoom={cropZoom}
+                          aspect={4 / 3}
+                          onCropChange={setCrop}
+                          onCropComplete={onCropComplete}
+                          onZoomChange={setCropZoom}
+                        />
+                        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 flex gap-4 z-50">
+                          <button 
+                            onClick={() => setActiveTool('select')}
+                            className="bg-neutral-800 hover:bg-neutral-700 text-white px-6 py-2 rounded-xl border border-neutral-700 font-bold transition-all"
+                          >
+                            Cancel
+                          </button>
+                          <button 
+                            onClick={applyCrop}
+                            className="bg-emerald-600 hover:bg-emerald-500 text-white px-6 py-2 rounded-xl shadow-lg shadow-emerald-900/20 font-bold transition-all flex items-center gap-2"
+                          >
+                            <Check size={18} />
+                            Apply Crop
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="relative max-w-full max-h-full shadow-2xl rounded-lg border border-neutral-700 bg-neutral-800" style={{ perspective: '1200px' }}>
+                        <motion.div
+                          drag={activeTool === 'hand'}
+                          dragMomentum={false}
+                          onDragEnd={(_, info) => {
+                            setPanOffset(prev => ({
+                              x: prev.x + info.offset.x,
+                              y: prev.y + info.offset.y
+                            }));
+                          }}
+                          onPan={activeTool === 'perspective' ? (_, info) => {
+                            setRotation(prev => ({
+                              x: Math.min(Math.max(prev.x - info.delta.y * 0.2, -30), 30),
+                              y: Math.min(Math.max(prev.y + info.delta.x * 0.2, -30), 30)
+                            }));
+                          } : undefined}
+                          animate={{ 
+                            scale: zoomLevel,
+                            x: panOffset.x,
+                            y: panOffset.y,
+                            rotateX: rotation.x,
+                            rotateY: rotation.y,
+                          }}
+                          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                          className={cn(
+                            "relative preserve-3d",
+                            activeTool === 'hand' ? "cursor-grab active:cursor-grabbing" : 
+                            activeTool === 'perspective' ? "cursor-move" : "cursor-default"
+                          )}
+                        >
+                          <img 
+                            src={currentImage} 
+                            alt="Landscape View" 
+                            className="max-w-full max-h-full object-contain pointer-events-none"
+                            referrerPolicy="no-referrer"
+                          />
+                          
+                          {/* Grid Overlay */}
+                          <AnimatePresence>
+                            {showGrid && (
+                              <motion.div 
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 0.3 }}
+                                exit={{ opacity: 0 }}
+                                className="absolute inset-0 pointer-events-none"
+                                style={{
+                                  backgroundImage: `linear-gradient(to right, #ffffff11 1px, transparent 1px), linear-gradient(to bottom, #ffffff11 1px, transparent 1px)`,
+                                  backgroundSize: `${40 / zoomLevel}px ${40 / zoomLevel}px`
+                                }}
+                              />
+                            )}
+                          </AnimatePresence>
+                        </motion.div>
+
+                        {/* Perspective Controls Overlay */}
+                        {activeTool === 'perspective' && (
+                          <div className="absolute top-4 right-4 flex flex-col gap-2 z-30 bg-black/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 shadow-2xl w-48">
+                            <div className="flex items-center justify-between mb-3">
+                              <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Perspective</div>
+                              <button onClick={() => setRotation({ x: 0, y: 0 })} className="text-neutral-500 hover:text-white transition-colors">
+                                <RefreshCw size={12} />
+                              </button>
+                            </div>
+                            
+                            <div className="space-y-4">
+                              <div className="space-y-2">
+                                <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
+                                  <span>TILT</span>
+                                  <span>{rotation.x.toFixed(0)}°</span>
+                                </div>
+                                <input 
+                                  type="range" min="-30" max="30" value={rotation.x}
+                                  onChange={(e) => setRotation(prev => ({ ...prev, x: parseInt(e.target.value) }))}
+                                  className="w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                />
+                              </div>
+                              <div className="space-y-2">
+                                <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
+                                  <span>PAN</span>
+                                  <span>{rotation.y.toFixed(0)}°</span>
+                                </div>
+                                <input 
+                                  type="range" min="-30" max="30" value={rotation.y}
+                                  onChange={(e) => setRotation(prev => ({ ...prev, y: parseInt(e.target.value) }))}
+                                  className="w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                />
+                              </div>
+                            </div>
+                            <div className="mt-4 pt-3 border-t border-white/5 text-[9px] text-neutral-500 italic leading-tight">
+                              Drag on the image to adjust perspective freely.
+                            </div>
+                          </div>
+                        )}
+
+                      {/* Walkthrough Controls */}
+                      {images.length > 1 && (
+                        <>
+                          <div className="absolute left-4 top-1/2 -translate-y-1/2 z-20">
+                            <Tooltip text="Previous Angle">
+                              <button 
+                                onClick={prevAngle}
+                                className="p-3 rounded-full bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-all border border-white/10"
+                              >
+                                <ChevronLeft size={24} />
+                              </button>
+                            </Tooltip>
+                          </div>
+                          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20">
+                            <Tooltip text="Next Angle">
+                              <button 
+                                onClick={nextAngle}
+                                className="p-3 rounded-full bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-all border border-white/10"
+                              >
+                                <ChevronRight size={24} />
+                              </button>
+                            </Tooltip>
+                          </div>
+                        </>
+                      )}
+
+                      {/* Scale Reference */}
+                      <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded text-[10px] font-mono text-white/80 border border-white/10 z-20">
+                        GRID SCALE: 1 UNIT = 3 FT | ZOOM: {zoomLevel.toFixed(1)}x
+                      </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center gap-6 max-w-md text-center px-6">
+                    <div className="w-20 h-20 rounded-full bg-neutral-800 flex items-center justify-center border border-neutral-700">
+                      <Camera className="text-neutral-500 w-8 h-8" />
+                    </div>
+                    <div>
+                      <h2 className="text-2xl font-bold mb-2">Property Walkthrough</h2>
+                      <p className="text-neutral-400">Upload multiple photos from different angles to create a virtual walkthrough of your property.</p>
+                    </div>
+                    <div className="flex gap-4 w-full">
+                      <button 
+                        onClick={() => fileInputRef.current?.click()}
+                        className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2"
+                      >
+                        <Upload size={20} />
+                        Upload Photos
+                      </button>
+                      <input 
+                        type="file" 
+                        ref={fileInputRef} 
+                        onChange={handleFileUpload} 
+                        className="hidden" 
+                        accept="image/*"
+                        multiple
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Canvas Controls */}
+                <div className="absolute bottom-6 left-6 flex gap-2 z-30">
+                  <div className="flex bg-neutral-800 border border-neutral-700 rounded-xl overflow-hidden">
+                    <Tooltip text="Select Tool">
+                      <button 
+                        onClick={() => setActiveTool('select')}
+                        className={cn(
+                          "p-3 transition-all border-r border-neutral-700",
+                          activeTool === 'select' ? "bg-emerald-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-700"
+                        )}
+                      >
+                        <BoxSelect size={20} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Hand Tool (Pan)">
+                      <button 
+                        onClick={() => setActiveTool('hand')}
+                        className={cn(
+                          "p-3 transition-all border-r border-neutral-700",
+                          activeTool === 'hand' ? "bg-emerald-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-700"
+                        )}
+                      >
+                        <Hand size={20} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Crop Tool">
+                      <button 
+                        onClick={() => setActiveTool('crop')}
+                        className={cn(
+                          "p-3 transition-all border-r border-neutral-700",
+                          activeTool === 'crop' ? "bg-emerald-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-700"
+                        )}
+                      >
+                        <Crop size={20} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Perspective Tool">
+                      <button 
+                        onClick={() => setActiveTool('perspective')}
+                        className={cn(
+                          "p-3 transition-all",
+                          activeTool === 'perspective' ? "bg-emerald-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-700"
+                        )}
+                      >
+                        <RotateCw size={20} />
+                      </button>
+                    </Tooltip>
+                  </div>
+
+                  <Tooltip text="Toggle measurement grid (1 unit = 3 ft)">
+                    <button 
+                      onClick={() => setShowGrid(!showGrid)}
+                      className={cn(
+                        "p-3 rounded-xl border transition-all flex items-center gap-2",
+                        showGrid 
+                          ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
+                          : "bg-neutral-800 border-neutral-700 text-neutral-400 hover:bg-neutral-700"
+                      )}
+                    >
+                      <Grid3X3 size={20} />
+                      <span className="text-xs font-bold uppercase tracking-wider">Grid</span>
+                    </button>
+                  </Tooltip>
+                  
+                  {currentImage && (
+                    <>
+                      <div className="flex bg-neutral-800 border border-neutral-700 rounded-xl overflow-hidden">
+                        <Tooltip text="Zoom Out">
+                          <button 
+                            onClick={() => handleZoom(-0.2)}
+                            className="p-3 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-all border-r border-neutral-700"
+                          >
+                            <ZoomOut size={20} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip text="Reset View">
+                          <button 
+                            onClick={() => {
+                              setZoomLevel(1);
+                              setPanOffset({ x: 0, y: 0 });
+                              setRotation({ x: 0, y: 0 });
+                            }}
+                            className="p-3 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-all border-r border-neutral-700"
+                          >
+                            <Maximize size={20} />
+                          </button>
+                        </Tooltip>
+                        <Tooltip text="Zoom In">
+                          <button 
+                            onClick={() => handleZoom(0.2)}
+                            className="p-3 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-all"
+                          >
+                            <ZoomIn size={20} />
+                          </button>
+                        </Tooltip>
+                      </div>
+
+                      <Tooltip text="Delete this angle">
+                        <button 
+                          onClick={() => {
+                            if (!activeProjectId || !currentVersion) return;
+                            const newImages = images.filter((_, i) => i !== activeIndex);
+                            setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+                              ...p,
+                              versions: p.versions.map(v => v.id === p.currentVersionId ? {
+                                ...v,
+                                images: newImages
+                              } : v)
+                            } : p));
+                            if (activeIndex >= newImages.length) {
+                              setActiveIndex(Math.max(0, newImages.length - 1));
+                            }
+                          }}
+                          className="p-3 rounded-xl bg-neutral-800 border border-neutral-700 text-neutral-400 hover:bg-red-900/30 hover:text-red-400 hover:border-red-900/50 transition-all flex items-center gap-2"
+                        >
+                          <Trash2 size={20} />
+                        </button>
+                      </Tooltip>
+                    </>
+                  )}
+                </div>
+              </div>
+
+              {/* Gallery Strip */}
+              {images.length > 0 && (
+                <div className="h-24 bg-neutral-900/80 border-t border-neutral-800 p-3 flex items-center gap-3 overflow-x-auto scrollbar-thin scrollbar-thumb-neutral-800">
+                  <Tooltip text="Add new photo angle">
+                    <button 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex-shrink-0 w-16 h-16 rounded-lg border-2 border-dashed border-neutral-700 flex flex-col items-center justify-center text-neutral-500 hover:border-emerald-500 hover:text-emerald-500 transition-all"
+                    >
+                      <Plus size={20} />
+                      <span className="text-[8px] font-bold uppercase mt-1">Add</span>
+                    </button>
+                  </Tooltip>
+                  {images.map((img, i) => (
+                    <button
+                      key={img.id}
+                      onClick={() => {
+                        setActiveIndex(i);
+                        setZoomLevel(1);
+                      }}
+                      className={cn(
+                        "flex-shrink-0 w-24 h-16 rounded-lg overflow-hidden border-2 transition-all relative group",
+                        i === activeIndex ? "border-emerald-500 scale-105 shadow-lg shadow-emerald-900/20" : "border-neutral-800 hover:border-neutral-600"
+                      )}
+                    >
+                      <img src={img.url} className="w-full h-full object-cover" alt={img.name} />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        <span className="text-[8px] font-bold text-white uppercase">{img.name}</span>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* Chat Sidebar */}
@@ -286,9 +852,11 @@ export default function App() {
                           : "bg-neutral-800 text-neutral-200 rounded-tl-none border border-neutral-700"
                       )}
                     >
-                      <Markdown className="prose prose-invert prose-sm max-w-none">
-                        {msg.content}
-                      </Markdown>
+                      <div className="prose prose-invert prose-sm max-w-none">
+                        <Markdown>
+                          {msg.content}
+                        </Markdown>
+                      </div>
                     </div>
                   ))}
                   {isProcessing && (
@@ -317,13 +885,17 @@ export default function App() {
                       placeholder="e.g., Add a modern fire pit area with gravel..."
                       className="w-full bg-neutral-800 border border-neutral-700 rounded-xl py-3 pl-4 pr-12 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/50 transition-all resize-none h-24"
                     />
-                    <button 
-                      onClick={handleSendMessage}
-                      disabled={!inputMessage.trim() || isProcessing}
-                      className="absolute bottom-3 right-3 p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-all"
-                    >
-                      <Send size={18} />
-                    </button>
+                    <div className="absolute bottom-3 right-3">
+                      <Tooltip text="Send message to AI assistant">
+                        <button 
+                          onClick={handleSendMessage}
+                          disabled={!inputMessage.trim() || isProcessing}
+                          className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-50 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-all"
+                        >
+                          <Send size={18} />
+                        </button>
+                      </Tooltip>
+                    </div>
                   </div>
                   <p className="text-[10px] text-neutral-500 mt-2 text-center">
                     AI can make mistakes. Verify important measurements.
@@ -347,8 +919,11 @@ export default function App() {
                     <input 
                       type="text" 
                       placeholder="ZIP Code" 
-                      value={projectData.zipCode}
-                      onChange={(e) => setProjectData(prev => ({ ...prev, zipCode: e.target.value }))}
+                      value={activeProject?.zipCode || ''}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setProjects(prev => prev.map(p => p.id === activeProjectId ? { ...p, zipCode: val } : p));
+                      }}
                       className="bg-transparent border-none focus:outline-none text-sm w-24 font-mono"
                     />
                   </div>
@@ -364,9 +939,11 @@ export default function App() {
                         <ImageIcon size={18} className="text-emerald-500" />
                         Materials List
                       </h3>
-                      <button className="text-xs text-emerald-500 font-bold hover:text-emerald-400 flex items-center gap-1">
-                        <Plus size={14} /> Add Custom
-                      </button>
+                      <Tooltip text="Add a custom material item">
+                        <button className="text-xs text-emerald-500 font-bold hover:text-emerald-400 flex items-center gap-1">
+                          <Plus size={14} /> Add Custom
+                        </button>
+                      </Tooltip>
                     </div>
                     <table className="w-full text-left">
                       <thead>
@@ -378,7 +955,7 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-neutral-800">
-                        {projectData.materials.map((m) => (
+                        {currentVersion?.materials.map((m) => (
                           <tr key={m.id} className="group hover:bg-neutral-800/30 transition-colors">
                             <td className="px-6 py-4">
                               <div className="font-medium text-sm">{m.name}</div>
@@ -415,8 +992,14 @@ export default function App() {
                           <DollarSign size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500" />
                           <input 
                             type="number" 
-                            value={projectData.laborRate}
-                            onChange={(e) => setProjectData(prev => ({ ...prev, laborRate: parseFloat(e.target.value) || 0 }))}
+                            value={currentVersion?.laborRate || 0}
+                            onChange={(e) => {
+                              const val = parseFloat(e.target.value) || 0;
+                              setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+                                ...p,
+                                versions: p.versions.map(v => v.id === p.currentVersionId ? { ...v, laborRate: val } : v)
+                              } : p));
+                            }}
                             className="w-full bg-neutral-800 border border-neutral-700 rounded-xl py-2 pl-8 pr-4 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                           />
                         </div>
@@ -425,8 +1008,14 @@ export default function App() {
                         <label className="text-xs text-neutral-500 uppercase font-mono">Estimated Hours</label>
                         <input 
                           type="number" 
-                          value={projectData.laborHours}
-                          onChange={(e) => setProjectData(prev => ({ ...prev, laborHours: parseFloat(e.target.value) || 0 }))}
+                          value={currentVersion?.laborHours || 0}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value) || 0;
+                            setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+                              ...p,
+                              versions: p.versions.map(v => v.id === p.currentVersionId ? { ...v, laborHours: val } : v)
+                            } : p));
+                          }}
                           className="w-full bg-neutral-800 border border-neutral-700 rounded-xl py-2 px-4 text-sm focus:outline-none focus:ring-1 focus:ring-emerald-500"
                         />
                       </div>
@@ -445,11 +1034,11 @@ export default function App() {
                       <div className="space-y-3 border-t border-emerald-500/50 pt-6">
                         <div className="flex justify-between text-sm">
                           <span className="text-emerald-100">Materials</span>
-                          <span className="font-mono">${projectData.materials.reduce((sum, m) => sum + (m.unitPrice * m.quantity), 0).toLocaleString()}</span>
+                          <span className="font-mono">${(currentVersion?.materials.reduce((sum, m) => sum + (m.unitPrice * m.quantity), 0) || 0).toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between text-sm">
                           <span className="text-emerald-100">Labor</span>
-                          <span className="font-mono">${(projectData.laborRate * projectData.laborHours).toLocaleString()}</span>
+                          <span className="font-mono">${((currentVersion?.laborRate || 0) * (currentVersion?.laborHours || 0)).toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between text-sm pt-2 border-t border-emerald-500/30">
                           <span className="text-emerald-100">Tax (Est. 8%)</span>
@@ -457,9 +1046,11 @@ export default function App() {
                         </div>
                       </div>
 
-                      <button className="w-full bg-white text-emerald-700 font-bold py-4 rounded-2xl mt-8 hover:bg-emerald-50 transition-all shadow-xl">
-                        Generate Quote PDF
-                      </button>
+                      <Tooltip text="Export estimate as a PDF document">
+                        <button className="w-full bg-white text-emerald-700 font-bold py-4 rounded-2xl mt-8 hover:bg-emerald-50 transition-all shadow-xl">
+                          Generate Quote PDF
+                        </button>
+                      </Tooltip>
                     </div>
                   </div>
 
@@ -467,7 +1058,7 @@ export default function App() {
                     <h4 className="text-xs font-mono text-neutral-500 uppercase tracking-widest mb-4">Market Context</h4>
                     <div className="space-y-4">
                       <div className="p-3 bg-neutral-800/50 rounded-xl border border-neutral-700/50">
-                        <p className="text-xs text-neutral-400 mb-1">Local Material Index ({projectData.zipCode || 'Global'})</p>
+                        <p className="text-xs text-neutral-400 mb-1">Local Material Index ({activeProject?.zipCode || 'Global'})</p>
                         <div className="flex items-center gap-2">
                           <div className="flex-1 h-1.5 bg-neutral-700 rounded-full overflow-hidden">
                             <div className="h-full bg-emerald-500 w-[65%]" />

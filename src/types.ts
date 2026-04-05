@@ -6,11 +6,32 @@ export interface Material {
   quantity: number;
 }
 
-export interface ProjectData {
-  zipCode: string;
+export interface ImageAngle {
+  id: string;
+  url: string;
+  name: string;
+  timestamp: number;
+}
+
+export interface ProjectVersion {
+  id: string;
+  name: string;
+  timestamp: number;
+  images: ImageAngle[];
   materials: Material[];
   laborRate: number;
   laborHours: number;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  description: string;
+  zipCode: string;
+  createdAt: number;
+  updatedAt: number;
+  versions: ProjectVersion[];
+  currentVersionId: string;
 }
 
 export const DEFAULT_MATERIALS: Material[] = [
