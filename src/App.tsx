@@ -195,6 +195,8 @@ export default function App() {
           } : p));
           setActiveIndex(0);
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "Here is a design based on your description." }]);
+        } else {
+          setMessages(prev => [...prev, { role: 'ai', content: "I couldn't generate a visual for that description. Could you try being more specific about the landscape elements?" }]);
         }
       } else {
         const result = await editLandscapeImage(currentImage, userMsg);
@@ -207,6 +209,8 @@ export default function App() {
             } : v)
           } : p));
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "I've updated the design for this angle." }]);
+        } else {
+          setMessages(prev => [...prev, { role: 'ai', content: "I was unable to modify the image. Please try a different request." }]);
         }
       }
     } catch (error) {
@@ -466,9 +470,16 @@ export default function App() {
                   PROJECT: {activeProject?.name.toUpperCase()}
                 </div>
               </div>
-              <div className="flex-1 relative overflow-hidden flex items-center justify-center">
+              <div className="flex-1 relative overflow-hidden flex items-center justify-center bg-neutral-900/50">
+                {isProcessing && !currentImage && (
+                  <div className="absolute inset-0 z-40 flex flex-col items-center justify-center bg-neutral-950/50 backdrop-blur-sm">
+                    <div className="w-12 h-12 border-4 border-emerald-500/20 border-t-emerald-500 rounded-full animate-spin mb-4" />
+                    <p className="text-emerald-500 font-mono text-xs animate-pulse uppercase tracking-widest">Generating Visuals...</p>
+                  </div>
+                )}
+                
                 {currentImage ? (
-                  <div className="relative w-full h-full flex items-center justify-center p-8">
+                  <div className="relative w-full h-full flex items-center justify-center p-4 md:p-8">
                     {activeTool === 'crop' ? (
                       <div className="relative w-full h-full bg-neutral-900 rounded-2xl overflow-hidden border border-neutral-800">
                         <Cropper
@@ -497,130 +508,148 @@ export default function App() {
                         </div>
                       </div>
                     ) : (
-                      <div className="relative max-w-full max-h-full shadow-2xl rounded-lg border border-neutral-700 bg-neutral-800" style={{ perspective: '1200px' }}>
-                        <motion.div
-                          drag={activeTool === 'hand'}
-                          dragMomentum={false}
-                          onDragEnd={(_, info) => {
-                            setPanOffset(prev => ({
-                              x: prev.x + info.offset.x,
-                              y: prev.y + info.offset.y
-                            }));
+                      <div className="relative w-full h-full max-w-6xl max-h-full flex items-center justify-center">
+                        <div 
+                          className="relative shadow-2xl rounded-2xl border border-neutral-700 bg-neutral-800 overflow-hidden flex items-center justify-center" 
+                          style={{ 
+                            perspective: '1200px',
+                            width: 'fit-content',
+                            height: 'fit-content',
+                            maxWidth: '100%',
+                            maxHeight: '100%'
                           }}
-                          onPan={activeTool === 'perspective' ? (_, info) => {
-                            setRotation(prev => ({
-                              x: Math.min(Math.max(prev.x - info.delta.y * 0.2, -30), 30),
-                              y: Math.min(Math.max(prev.y + info.delta.x * 0.2, -30), 30)
-                            }));
-                          } : undefined}
-                          animate={{ 
-                            scale: zoomLevel,
-                            x: panOffset.x,
-                            y: panOffset.y,
-                            rotateX: rotation.x,
-                            rotateY: rotation.y,
-                          }}
-                          transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                          className={cn(
-                            "relative preserve-3d",
-                            activeTool === 'hand' ? "cursor-grab active:cursor-grabbing" : 
-                            activeTool === 'perspective' ? "cursor-move" : "cursor-default"
-                          )}
                         >
-                          <img 
-                            src={currentImage} 
-                            alt="Landscape View" 
-                            className="max-w-full max-h-full object-contain pointer-events-none"
-                            referrerPolicy="no-referrer"
-                          />
-                          
-                          {/* Grid Overlay */}
-                          <AnimatePresence>
-                            {showGrid && (
-                              <motion.div 
-                                initial={{ opacity: 0 }}
-                                animate={{ opacity: 0.3 }}
-                                exit={{ opacity: 0 }}
-                                className="absolute inset-0 pointer-events-none"
-                                style={{
-                                  backgroundImage: `linear-gradient(to right, #ffffff11 1px, transparent 1px), linear-gradient(to bottom, #ffffff11 1px, transparent 1px)`,
-                                  backgroundSize: `${40 / zoomLevel}px ${40 / zoomLevel}px`
-                                }}
-                              />
+                          <motion.div
+                            drag={activeTool === 'hand'}
+                            dragMomentum={false}
+                            onDragEnd={(_, info) => {
+                              setPanOffset(prev => ({
+                                x: prev.x + info.offset.x,
+                                y: prev.y + info.offset.y
+                              }));
+                            }}
+                            onPan={activeTool === 'perspective' ? (_, info) => {
+                              if (!info.delta) return;
+                              setRotation(prev => ({
+                                x: Math.min(Math.max(prev.x - (info.delta.y || 0) * 0.2, -30), 30),
+                                y: Math.min(Math.max(prev.y + (info.delta.x || 0) * 0.2, -30), 30)
+                              }));
+                            } : undefined}
+                            animate={{ 
+                              scale: zoomLevel,
+                              x: panOffset.x,
+                              y: panOffset.y,
+                              rotateX: rotation.x,
+                              rotateY: rotation.y,
+                            }}
+                            transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+                            className={cn(
+                              "relative preserve-3d flex items-center justify-center",
+                              activeTool === 'hand' ? "cursor-grab active:cursor-grabbing" : 
+                              activeTool === 'perspective' ? "cursor-move" : "cursor-default"
                             )}
-                          </AnimatePresence>
-                        </motion.div>
-
-                        {/* Perspective Controls Overlay */}
-                        {activeTool === 'perspective' && (
-                          <div className="absolute top-4 right-4 flex flex-col gap-2 z-30 bg-black/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 shadow-2xl w-48">
-                            <div className="flex items-center justify-between mb-3">
-                              <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Perspective</div>
-                              <button onClick={() => setRotation({ x: 0, y: 0 })} className="text-neutral-500 hover:text-white transition-colors">
-                                <RefreshCw size={12} />
-                              </button>
-                            </div>
+                          >
+                            <img 
+                              key={currentImage}
+                              src={currentImage} 
+                              alt="Landscape View" 
+                              className="max-w-full max-h-full object-contain pointer-events-none shadow-2xl"
+                              referrerPolicy="no-referrer"
+                              onLoad={() => console.log('Image loaded successfully')}
+                              onError={(e) => {
+                                console.error('Image failed to load');
+                                (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/error/1200/800';
+                              }}
+                            />
                             
-                            <div className="space-y-4">
-                              <div className="space-y-2">
-                                <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
-                                  <span>TILT</span>
-                                  <span>{rotation.x.toFixed(0)}°</span>
-                                </div>
-                                <input 
-                                  type="range" min="-30" max="30" value={rotation.x}
-                                  onChange={(e) => setRotation(prev => ({ ...prev, x: parseInt(e.target.value) }))}
-                                  className="w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                            {/* Grid Overlay */}
+                            <AnimatePresence>
+                              {showGrid && (
+                                <motion.div 
+                                  initial={{ opacity: 0 }}
+                                  animate={{ opacity: 0.3 }}
+                                  exit={{ opacity: 0 }}
+                                  className="absolute inset-0 pointer-events-none"
+                                  style={{
+                                    backgroundImage: `linear-gradient(to right, #ffffff11 1px, transparent 1px), linear-gradient(to bottom, #ffffff11 1px, transparent 1px)`,
+                                    backgroundSize: `${40 / zoomLevel}px ${40 / zoomLevel}px`
+                                  }}
                                 />
+                              )}
+                            </AnimatePresence>
+                          </motion.div>
+
+                          {/* Perspective Controls Overlay */}
+                          {activeTool === 'perspective' && (
+                            <div className="absolute top-4 right-4 flex flex-col gap-2 z-30 bg-black/80 backdrop-blur-xl p-4 rounded-2xl border border-white/10 shadow-2xl w-48">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Perspective</div>
+                                <button onClick={() => setRotation({ x: 0, y: 0 })} className="text-neutral-500 hover:text-white transition-colors">
+                                  <RefreshCw size={12} />
+                                </button>
                               </div>
-                              <div className="space-y-2">
-                                <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
-                                  <span>PAN</span>
-                                  <span>{rotation.y.toFixed(0)}°</span>
+                              
+                              <div className="space-y-4">
+                                <div className="space-y-2">
+                                  <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
+                                    <span>TILT</span>
+                                    <span>{rotation.x.toFixed(0)}°</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="-30" max="30" value={rotation.x}
+                                    onChange={(e) => setRotation(prev => ({ ...prev, x: parseInt(e.target.value) }))}
+                                    className="w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                  />
                                 </div>
-                                <input 
-                                  type="range" min="-30" max="30" value={rotation.y}
-                                  onChange={(e) => setRotation(prev => ({ ...prev, y: parseInt(e.target.value) }))}
-                                  className="w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
-                                />
+                                <div className="space-y-2">
+                                  <div className="flex justify-between text-[10px] text-neutral-400 font-mono">
+                                    <span>PAN</span>
+                                    <span>{rotation.y.toFixed(0)}°</span>
+                                  </div>
+                                  <input 
+                                    type="range" min="-30" max="30" value={rotation.y}
+                                    onChange={(e) => setRotation(prev => ({ ...prev, y: parseInt(e.target.value) }))}
+                                    className="w-full h-1 bg-neutral-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
+                                  />
+                                </div>
+                              </div>
+                              <div className="mt-4 pt-3 border-t border-white/5 text-[9px] text-neutral-500 italic leading-tight">
+                                Drag on the image to adjust perspective freely.
                               </div>
                             </div>
-                            <div className="mt-4 pt-3 border-t border-white/5 text-[9px] text-neutral-500 italic leading-tight">
-                              Drag on the image to adjust perspective freely.
-                            </div>
-                          </div>
-                        )}
+                          )}
 
-                      {/* Walkthrough Controls */}
-                      {images.length > 1 && (
-                        <>
-                          <div className="absolute left-4 top-1/2 -translate-y-1/2 z-20">
-                            <Tooltip text="Previous Angle">
-                              <button 
-                                onClick={prevAngle}
-                                className="p-3 rounded-full bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-all border border-white/10"
-                              >
-                                <ChevronLeft size={24} />
-                              </button>
-                            </Tooltip>
-                          </div>
-                          <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20">
-                            <Tooltip text="Next Angle">
-                              <button 
-                                onClick={nextAngle}
-                                className="p-3 rounded-full bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-all border border-white/10"
-                              >
-                                <ChevronRight size={24} />
-                              </button>
-                            </Tooltip>
-                          </div>
-                        </>
-                      )}
+                          {/* Walkthrough Controls */}
+                          {images.length > 1 && (
+                            <>
+                              <div className="absolute left-4 top-1/2 -translate-y-1/2 z-20">
+                                <Tooltip text="Previous Angle">
+                                  <button 
+                                    onClick={prevAngle}
+                                    className="p-3 rounded-full bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-all border border-white/10"
+                                  >
+                                    <ChevronLeft size={24} />
+                                  </button>
+                                </Tooltip>
+                              </div>
+                              <div className="absolute right-4 top-1/2 -translate-y-1/2 z-20">
+                                <Tooltip text="Next Angle">
+                                  <button 
+                                    onClick={nextAngle}
+                                    className="p-3 rounded-full bg-black/40 backdrop-blur-md text-white hover:bg-black/60 transition-all border border-white/10"
+                                  >
+                                    <ChevronRight size={24} />
+                                  </button>
+                                </Tooltip>
+                              </div>
+                            </>
+                          )}
 
-                      {/* Scale Reference */}
-                      <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded text-[10px] font-mono text-white/80 border border-white/10 z-20">
-                        GRID SCALE: 1 UNIT = 3 FT | ZOOM: {zoomLevel.toFixed(1)}x
-                      </div>
+                          {/* Scale Reference */}
+                          <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-3 py-1 rounded text-[10px] font-mono text-white/80 border border-white/10 z-20">
+                            GRID SCALE: 1 UNIT = 3 FT | ZOOM: {zoomLevel.toFixed(1)}x
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>
