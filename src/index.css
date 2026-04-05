@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    @apply bg-neutral-950 text-neutral-100;
+  }
+}
+
+@layer utilities {
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 6px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    @apply bg-neutral-800 rounded-full;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+    @apply bg-neutral-700;
+  }
+}
+
+/* Simple prose-like styles for markdown */
+.prose {
+  @apply text-neutral-300 leading-relaxed;
+}
+.prose p {
+  @apply mb-4 last:mb-0;
+}
+.prose ul {
+  @apply list-disc pl-5 mb-4;
+}
+.prose li {
+  @apply mb-1;
+}
+.prose strong {
+  @apply text-white font-bold;
+}
