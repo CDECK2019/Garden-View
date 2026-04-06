@@ -47,7 +47,15 @@ import {
   Palette,
   Heart,
   Bookmark,
-  Dices
+  Dices,
+  Home,
+  Building,
+  Palmtree,
+  Waves,
+  Snowflake,
+  Anchor,
+  Gem,
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -58,7 +66,7 @@ import {
   ImageAngle, 
   Project, 
   ProjectVersion,
-  LANDSCAPE_TEMPLATES,
+  DESIGN_TEMPLATES,
   Template
 } from './types';
 import Markdown from 'react-markdown';
@@ -115,6 +123,7 @@ export default function App() {
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
+  const [activeTemplateCategory, setActiveTemplateCategory] = useState<'landscape' | 'interior'>('landscape');
   
   // Undo/Redo History
   const [history, setHistory] = useState<ProjectVersion[]>([]);
@@ -208,7 +217,7 @@ export default function App() {
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
 
   const createProject = (name: string, description: string, templateId?: string | null) => {
-    const template = LANDSCAPE_TEMPLATES.find(t => t.id === templateId);
+    const template = DESIGN_TEMPLATES.find(t => t.id === templateId);
     const initialMaterials = template ? [...template.materials] : [...DEFAULT_MATERIALS];
     
     const newVersion: ProjectVersion = {
@@ -366,7 +375,7 @@ export default function App() {
           setActiveIndex(0);
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "Here is a design based on your description." }]);
         } else {
-          setMessages(prev => [...prev, { role: 'ai', content: result.text || "I couldn't generate a visual for that description. Could you try being more specific about the landscape elements?" }]);
+          setMessages(prev => [...prev, { role: 'ai', content: result.text || "I couldn't generate a visual for that description. Could you try being more specific about the design elements?" }]);
         }
       } else {
         if (currentVersion) pushToHistory(currentVersion);
@@ -505,8 +514,8 @@ export default function App() {
             <Layout className="text-white w-6 h-6" />
           </div>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">TerraForm</h1>
-            <p className="text-xs text-neutral-400 font-mono uppercase tracking-widest">Landscape Designer</p>
+            <h1 className="text-xl font-bold tracking-tight">OmniSpace</h1>
+            <p className="text-xs text-neutral-400 font-mono uppercase tracking-widest">Design Studio</p>
           </div>
         </div>
 
@@ -559,7 +568,7 @@ export default function App() {
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 flex overflow-hidden relative">
+      <main className="flex-1 flex overflow-hidden relative z-[60]">
         {viewMode === 'dashboard' ? (
           <div className="flex-1 bg-neutral-950 overflow-y-auto p-8">
             <div className="max-w-6xl mx-auto space-y-8">
@@ -617,15 +626,54 @@ export default function App() {
                         </div>
 
                         <div>
-                          <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-4">Select a Design Template (Optional)</label>
+                          <div className="flex items-center justify-between mb-4">
+                            <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest">Select a Design Template (Optional)</label>
+                            <div className="flex bg-neutral-800 p-1 rounded-lg">
+                              <button 
+                                onClick={() => setActiveTemplateCategory('landscape')}
+                                className={cn(
+                                  "px-3 py-1 rounded-md text-[10px] font-bold uppercase transition-all",
+                                  activeTemplateCategory === 'landscape' ? "bg-emerald-600 text-white" : "text-neutral-500 hover:text-neutral-300"
+                                )}
+                              >
+                                Landscape
+                              </button>
+                              <button 
+                                onClick={() => setActiveTemplateCategory('interior')}
+                                className={cn(
+                                  "px-3 py-1 rounded-md text-[10px] font-bold uppercase transition-all",
+                                  activeTemplateCategory === 'interior' ? "bg-emerald-600 text-white" : "text-neutral-500 hover:text-neutral-300"
+                                )}
+                              >
+                                Interior
+                              </button>
+                            </div>
+                          </div>
+                          
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                            {LANDSCAPE_TEMPLATES.map(template => {
+                            {DESIGN_TEMPLATES.filter(t => t.category === activeTemplateCategory).map(template => {
                               const Icon = 
                                 template.id === 'modern' ? Layout : 
                                 template.id === 'rustic' ? Trees : 
                                 template.id === 'zen' ? Wind :
+                                template.id === 'mediterranean' ? Sun :
                                 template.id === 'cottage' ? Flower :
-                                template.id === 'desert' ? Mountain : Sun;
+                                template.id === 'tropical' ? Palmtree :
+                                template.id === 'desert' ? Mountain :
+                                template.id === 'french' ? Grid :
+                                template.id === 'coastal' ? Waves :
+                                template.id === 'woodland' ? Trees :
+                                template.id === 'nordic' ? Snowflake :
+                                template.id === 'japandi' ? Home :
+                                template.id === 'midcentury' ? Palette :
+                                template.id === 'industrial' ? Building :
+                                template.id === 'scandinavian' ? Home :
+                                template.id === 'farmhouse' ? Home :
+                                template.id === 'hamptons' ? Anchor :
+                                template.id === 'artdeco' ? Gem :
+                                template.id === 'bohemian' ? Heart :
+                                template.id === 'provincial' ? Flower :
+                                template.id === 'maximalist' ? Sparkles : Layout;
                               return (
                                 <button
                                   key={template.id}
@@ -678,7 +726,7 @@ export default function App() {
                     <FolderOpen className="text-neutral-500 w-8 h-8" />
                   </div>
                   <h3 className="text-xl font-bold">No Projects Yet</h3>
-                  <p className="text-neutral-400 max-w-sm">Create your first project to start visualizing and estimating your landscape designs.</p>
+                  <p className="text-neutral-400 max-w-sm">Create your first project to start visualizing and estimating your landscape or interior designs.</p>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -1090,7 +1138,7 @@ export default function App() {
                 )}
 
                 {/* Canvas Controls */}
-                <div className="absolute bottom-6 left-6 flex gap-2 z-30">
+                <div className="absolute bottom-6 left-6 flex gap-2 z-[60]">
                   <div className="flex bg-neutral-800 border border-neutral-700 rounded-xl overflow-hidden">
                     <Tooltip text="Select Tool">
                       <button 
@@ -1220,51 +1268,88 @@ export default function App() {
                           initial={{ opacity: 0, y: 10, scale: 0.95 }}
                           animate={{ opacity: 1, y: 0, scale: 1 }}
                           exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                          className="absolute bottom-full mb-4 left-0 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl p-4 w-72 z-[100]"
+                          className="fixed bottom-[88px] left-6 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl p-4 w-80 z-[100] max-h-[70vh] flex flex-col"
                         >
-                          <div className="flex items-center justify-between mb-3 pb-2 border-b border-neutral-800">
-                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Select Style</h4>
+                          <div className="flex items-center justify-between mb-3 pb-2 border-b border-neutral-800 flex-none">
+                            <div className="flex bg-neutral-800 p-0.5 rounded-lg">
+                              <button 
+                                onClick={() => setActiveTemplateCategory('landscape')}
+                                className={cn(
+                                  "px-2 py-1 rounded-md text-[9px] font-bold uppercase transition-all",
+                                  activeTemplateCategory === 'landscape' ? "bg-emerald-600 text-white" : "text-neutral-500 hover:text-neutral-300"
+                                )}
+                              >
+                                Landscape
+                              </button>
+                              <button 
+                                onClick={() => setActiveTemplateCategory('interior')}
+                                className={cn(
+                                  "px-2 py-1 rounded-md text-[9px] font-bold uppercase transition-all",
+                                  activeTemplateCategory === 'interior' ? "bg-emerald-600 text-white" : "text-neutral-500 hover:text-neutral-300"
+                                )}
+                              >
+                                Interior
+                              </button>
+                            </div>
                             <button onClick={() => setIsStylesMenuOpen(false)} className="text-neutral-500 hover:text-white">
                               <X size={14} />
                             </button>
                           </div>
                           
-                          <button 
-                            onClick={() => {
-                              handleVariation();
-                              setIsStylesMenuOpen(false);
-                            }}
-                            disabled={isProcessing}
-                            className="w-full mb-3 p-3 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-600/20 transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
-                          >
-                            <Dices size={18} className="group-hover:rotate-12 transition-transform" />
-                            <span className="text-xs font-bold uppercase tracking-wider">Shuffle Variation</span>
-                          </button>
+                          <div className="flex-1 overflow-y-auto pr-1 scrollbar-thin">
+                            <button 
+                              onClick={() => {
+                                handleVariation();
+                                setIsStylesMenuOpen(false);
+                              }}
+                              disabled={isProcessing}
+                              className="w-full mb-3 p-3 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-600/20 transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
+                            >
+                              <Dices size={18} className="group-hover:rotate-12 transition-transform" />
+                              <span className="text-xs font-bold uppercase tracking-wider">Shuffle Variation</span>
+                            </button>
 
-                          <div className="grid grid-cols-2 gap-2">
-                            {LANDSCAPE_TEMPLATES.map(template => {
-                              const Icon = 
-                                template.id === 'modern' ? Layout : 
-                                template.id === 'rustic' ? Trees : 
-                                template.id === 'zen' ? Wind :
-                                template.id === 'cottage' ? Flower :
-                                template.id === 'desert' ? Mountain : Sun;
-                              return (
-                                <button
-                                  key={template.id}
-                                  onClick={() => {
-                                    handleSendMessage(`Apply the ${template.name} style to this image. ${template.description}`);
-                                    setIsStylesMenuOpen(false);
-                                  }}
-                                  className="flex flex-col items-center gap-2 p-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition-all group"
-                                >
-                                  <div className="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center text-neutral-400 group-hover:text-emerald-400 transition-colors">
-                                    <Icon size={16} />
-                                  </div>
-                                  <span className="text-[10px] font-bold text-center leading-tight">{template.name}</span>
-                                </button>
-                              );
-                            })}
+                            <div className="grid grid-cols-2 gap-2 pb-2">
+                              {DESIGN_TEMPLATES.filter(t => t.category === activeTemplateCategory).map(template => {
+                                const Icon = 
+                                  template.id === 'modern' ? Layout : 
+                                  template.id === 'rustic' ? Trees : 
+                                  template.id === 'zen' ? Wind :
+                                  template.id === 'mediterranean' ? Sun :
+                                  template.id === 'cottage' ? Flower :
+                                  template.id === 'tropical' ? Palmtree :
+                                  template.id === 'desert' ? Mountain :
+                                  template.id === 'french' ? Grid :
+                                  template.id === 'coastal' ? Waves :
+                                  template.id === 'woodland' ? Trees :
+                                  template.id === 'nordic' ? Snowflake :
+                                  template.id === 'japandi' ? Home :
+                                  template.id === 'midcentury' ? Palette :
+                                  template.id === 'industrial' ? Building :
+                                  template.id === 'scandinavian' ? Home :
+                                  template.id === 'farmhouse' ? Home :
+                                  template.id === 'hamptons' ? Anchor :
+                                  template.id === 'artdeco' ? Gem :
+                                  template.id === 'bohemian' ? Heart :
+                                  template.id === 'provincial' ? Flower :
+                                  template.id === 'maximalist' ? Sparkles : Layout;
+                                return (
+                                  <button
+                                    key={template.id}
+                                    onClick={() => {
+                                      handleSendMessage(`Apply the ${template.name} style to this image. ${template.description}`);
+                                      setIsStylesMenuOpen(false);
+                                    }}
+                                    className="flex flex-col items-center gap-2 p-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition-all group"
+                                  >
+                                    <div className="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center text-neutral-400 group-hover:text-emerald-400 transition-colors">
+                                      <Icon size={16} />
+                                    </div>
+                                    <span className="text-[10px] font-bold text-center leading-tight">{template.name}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
                           </div>
                         </motion.div>
                       )}
@@ -1419,7 +1504,7 @@ export default function App() {
                   {messages.length === 0 && (
                     <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-50">
                       <MessageSquare size={48} className="mb-4 text-neutral-700" />
-                      <p className="text-sm">Describe your dream landscape to start designing.</p>
+                      <p className="text-sm">Describe your dream space to start designing.</p>
                     </div>
                   )}
                   {messages.map((msg, i) => (
