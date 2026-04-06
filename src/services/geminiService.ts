@@ -8,24 +8,44 @@ export const MODEL_NAME = "gemini-2.5-flash-image";
 export async function editLandscapeImage(
   base64Image: string,
   prompt: string,
-  mimeType: string = "image/png"
+  mimeType: string = "image/png",
+  maskImage?: string
 ): Promise<{ imageUrl: string; text?: string }> {
   const ai = new GoogleGenAI({ apiKey });
   
+  const parts: any[] = [
+    {
+      inlineData: {
+        data: base64Image.split(",")[1] || base64Image,
+        mimeType: mimeType,
+      },
+    },
+  ];
+
+  if (maskImage) {
+    parts.push({
+      inlineData: {
+        data: maskImage.split(",")[1] || maskImage,
+        mimeType: "image/png",
+      },
+    });
+    parts.push({
+      text: `You are a professional landscape architect. Modify the provided image based on this request: ${prompt}. 
+      A mask image has been provided where the white areas indicate the region you should EXCLUSIVELY focus on and modify. 
+      Do NOT change anything outside of the masked area. Return the modified image. 
+      If you have any specific advice or notes about the design, include them as text.`,
+    });
+  } else {
+    parts.push({
+      text: `You are a professional landscape architect. Modify the provided image based on this request: ${prompt}. 
+      Return the modified image. If you have any specific advice or notes about the design, include them as text.`,
+    });
+  }
+
   const response = await ai.models.generateContent({
     model: MODEL_NAME,
     contents: {
-      parts: [
-        {
-          inlineData: {
-            data: base64Image.split(",")[1] || base64Image,
-            mimeType: mimeType,
-          },
-        },
-        {
-          text: `You are a professional landscape architect. Modify the provided image based on this request: ${prompt}. Return the modified image. If you have any specific advice or notes about the design, include them as text.`,
-        },
-      ],
+      parts: parts,
     },
   });
 

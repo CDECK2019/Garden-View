@@ -34,12 +34,24 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowLeft,
-  ArrowRight
+  ArrowRight,
+  Trees,
+  Sun,
+  PenTool,
+  Eraser
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
 import { editLandscapeImage, generateInitialLandscape } from './services/geminiService';
-import { Material, DEFAULT_MATERIALS, ImageAngle, Project, ProjectVersion } from './types';
+import { 
+  Material, 
+  DEFAULT_MATERIALS, 
+  ImageAngle, 
+  Project, 
+  ProjectVersion,
+  LANDSCAPE_TEMPLATES,
+  Template
+} from './types';
 import Markdown from 'react-markdown';
 import Cropper, { Area, Point } from 'react-easy-crop';
 
@@ -72,9 +84,20 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Image Manipulation State
-  const [activeTool, setActiveTool] = useState<'select' | 'hand' | 'crop' | 'perspective'>('select');
+  const [activeTool, setActiveTool] = useState<'select' | 'hand' | 'crop' | 'perspective' | 'highlight'>('select');
   const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
   const [rotation, setRotation] = useState({ x: 0, y: 0 });
+  
+  // Highlighting State
+  const [maskImage, setMaskImage] = useState<string | null>(null);
+  const [isDrawingMask, setIsDrawingMask] = useState(false);
+  const maskCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // New Project Modal State
+  const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [newProjectDesc, setNewProjectDesc] = useState('');
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   
   // Cropping State
   const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
@@ -87,13 +110,16 @@ export default function App() {
   const images = currentVersion?.images || [];
   const currentImage = images[activeIndex]?.url || null;
 
-  const createProject = (name: string, description: string) => {
+  const createProject = (name: string, description: string, templateId?: string | null) => {
+    const template = LANDSCAPE_TEMPLATES.find(t => t.id === templateId);
+    const initialMaterials = template ? [...template.materials] : [...DEFAULT_MATERIALS];
+    
     const newVersion: ProjectVersion = {
       id: Math.random().toString(36).substr(2, 9),
       name: 'Initial Version',
       timestamp: Date.now(),
       images: [],
-      materials: [...DEFAULT_MATERIALS],
+      materials: initialMaterials,
       laborRate: 65,
       laborHours: 0
     };
@@ -110,6 +136,10 @@ export default function App() {
     setProjects(prev => [...prev, newProject]);
     setActiveProjectId(newProject.id);
     setViewMode('design');
+    setIsNewProjectModalOpen(false);
+    setNewProjectName('');
+    setNewProjectDesc('');
+    setSelectedTemplateId(null);
   };
 
   const saveVersion = (name: string) => {
@@ -135,6 +165,46 @@ export default function App() {
     } : p));
     setActiveIndex(0);
     setZoomLevel(1);
+  };
+
+  const startDrawingMask = (e: React.MouseEvent | React.TouchEvent) => {
+    if (activeTool !== 'highlight') return;
+    setIsDrawingMask(true);
+    drawMask(e);
+  };
+
+  const stopDrawingMask = () => {
+    setIsDrawingMask(false);
+    if (maskCanvasRef.current) {
+      setMaskImage(maskCanvasRef.current.toDataURL());
+    }
+  };
+
+  const drawMask = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!isDrawingMask || activeTool !== 'highlight' || !maskCanvasRef.current) return;
+    
+    const canvas = maskCanvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const rect = canvas.getBoundingClientRect();
+    const x = (('touches' in e) ? e.touches[0].clientX : e.clientX) - rect.left;
+    const y = (('touches' in e) ? e.touches[0].clientY : e.clientY) - rect.top;
+
+    ctx.fillStyle = 'white';
+    ctx.beginPath();
+    ctx.arc(x, y, 20 / zoomLevel, 0, Math.PI * 2);
+    ctx.fill();
+  };
+
+  const clearMask = () => {
+    if (maskCanvasRef.current) {
+      const ctx = maskCanvasRef.current.getContext('2d');
+      if (ctx) {
+        ctx.clearRect(0, 0, maskCanvasRef.current.width, maskCanvasRef.current.height);
+        setMaskImage(null);
+      }
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -199,7 +269,7 @@ export default function App() {
           setMessages(prev => [...prev, { role: 'ai', content: "I couldn't generate a visual for that description. Could you try being more specific about the landscape elements?" }]);
         }
       } else {
-        const result = await editLandscapeImage(currentImage, userMsg);
+        const result = await editLandscapeImage(currentImage, userMsg, "image/png", maskImage || undefined);
         if (result.imageUrl) {
           setProjects(prev => prev.map(p => p.id === activeProjectId ? {
             ...p,
@@ -209,6 +279,7 @@ export default function App() {
             } : v)
           } : p));
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "I've updated the design for this angle." }]);
+          clearMask();
         } else {
           setMessages(prev => [...prev, { role: 'ai', content: "I was unable to modify the image. Please try a different request." }]);
         }
@@ -374,13 +445,103 @@ export default function App() {
                   <p className="text-neutral-400">Manage your landscaping projects and design versions.</p>
                 </div>
                 <button 
-                  onClick={() => createProject(`New Project ${projects.length + 1}`, 'A new landscape design project.')}
+                  onClick={() => setIsNewProjectModalOpen(true)}
                   className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-lg shadow-emerald-900/20 flex items-center gap-2"
                 >
                   <Plus size={20} />
                   New Project
                 </button>
               </div>
+
+              <AnimatePresence>
+                {isNewProjectModalOpen && (
+                  <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+                    <motion.div 
+                      initial={{ opacity: 0, scale: 0.95, y: 20 }}
+                      animate={{ opacity: 1, scale: 1, y: 0 }}
+                      exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                      className="bg-neutral-900 border border-neutral-800 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl"
+                    >
+                      <div className="p-6 border-b border-neutral-800 flex items-center justify-between">
+                        <h3 className="text-xl font-bold">Create New Project</h3>
+                        <button onClick={() => setIsNewProjectModalOpen(false)} className="text-neutral-500 hover:text-white">
+                          <X size={20} />
+                        </button>
+                      </div>
+                      
+                      <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto scrollbar-thin scrollbar-thumb-neutral-800">
+                        <div className="space-y-4">
+                          <div>
+                            <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Project Name</label>
+                            <input 
+                              type="text" 
+                              value={newProjectName}
+                              onChange={(e) => setNewProjectName(e.target.value)}
+                              placeholder="e.g., Smith Backyard Renovation"
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-2">Description</label>
+                            <textarea 
+                              value={newProjectDesc}
+                              onChange={(e) => setNewProjectDesc(e.target.value)}
+                              placeholder="Describe the project goals..."
+                              className="w-full bg-neutral-800 border border-neutral-700 rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-emerald-500/50 h-24 resize-none"
+                            />
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-4">Select a Design Template (Optional)</label>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            {LANDSCAPE_TEMPLATES.map(template => {
+                              const Icon = template.id === 'modern' ? Layout : template.id === 'rustic' ? Trees : Sun;
+                              return (
+                                <button
+                                  key={template.id}
+                                  onClick={() => setSelectedTemplateId(selectedTemplateId === template.id ? null : template.id)}
+                                  className={cn(
+                                    "p-4 rounded-2xl border-2 text-left transition-all group",
+                                    selectedTemplateId === template.id 
+                                      ? "border-emerald-500 bg-emerald-500/10 shadow-lg shadow-emerald-900/20" 
+                                      : "border-neutral-800 bg-neutral-800/50 hover:border-neutral-700"
+                                  )}
+                                >
+                                  <div className={cn(
+                                    "w-10 h-10 rounded-lg flex items-center justify-center mb-3 transition-colors",
+                                    selectedTemplateId === template.id ? "bg-emerald-600 text-white" : "bg-neutral-800 text-neutral-400 group-hover:text-neutral-200"
+                                  )}>
+                                    <Icon size={20} />
+                                  </div>
+                                  <h4 className="font-bold text-sm mb-1">{template.name}</h4>
+                                  <p className="text-[10px] text-neutral-500 leading-tight">{template.description}</p>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="p-6 bg-neutral-800/50 border-t border-neutral-800 flex gap-3">
+                        <button 
+                          onClick={() => setIsNewProjectModalOpen(false)}
+                          className="flex-1 px-6 py-3 rounded-xl border border-neutral-700 font-bold hover:bg-neutral-800 transition-all"
+                        >
+                          Cancel
+                        </button>
+                        <button 
+                          disabled={!newProjectName.trim()}
+                          onClick={() => createProject(newProjectName, newProjectDesc, selectedTemplateId)}
+                          className="flex-[2] px-6 py-3 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-500 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-all shadow-lg shadow-emerald-900/20"
+                        >
+                          Create Project
+                        </button>
+                      </div>
+                    </motion.div>
+                  </div>
+                )}
+              </AnimatePresence>
 
               {projects.length === 0 ? (
                 <div className="bg-neutral-900 border border-neutral-800 rounded-3xl p-12 text-center flex flex-col items-center gap-4">
@@ -555,10 +716,37 @@ export default function App() {
                               alt="Landscape View" 
                               className="max-w-full max-h-full object-contain pointer-events-none shadow-2xl"
                               referrerPolicy="no-referrer"
-                              onLoad={() => console.log('Image loaded successfully')}
+                              onLoad={(e) => {
+                                console.log('Image loaded successfully');
+                                if (maskCanvasRef.current) {
+                                  const img = e.target as HTMLImageElement;
+                                  maskCanvasRef.current.width = img.naturalWidth;
+                                  maskCanvasRef.current.height = img.naturalHeight;
+                                }
+                              }}
                               onError={(e) => {
                                 console.error('Image failed to load');
                                 (e.target as HTMLImageElement).src = 'https://picsum.photos/seed/error/1200/800';
+                              }}
+                            />
+                            
+                            {/* Mask Overlay */}
+                            <canvas
+                              ref={maskCanvasRef}
+                              onMouseDown={startDrawingMask}
+                              onMouseMove={drawMask}
+                              onMouseUp={stopDrawingMask}
+                              onMouseLeave={stopDrawingMask}
+                              onTouchStart={startDrawingMask}
+                              onTouchMove={drawMask}
+                              onTouchEnd={stopDrawingMask}
+                              className={cn(
+                                "absolute inset-0 w-full h-full object-contain z-10",
+                                activeTool === 'highlight' ? "cursor-crosshair opacity-50" : "pointer-events-none opacity-0"
+                              )}
+                              style={{ 
+                                mixBlendMode: 'screen',
+                                filter: 'drop-shadow(0 0 10px rgba(255,255,255,0.5))'
                               }}
                             />
                             
@@ -722,14 +910,38 @@ export default function App() {
                       <button 
                         onClick={() => setActiveTool('perspective')}
                         className={cn(
-                          "p-3 transition-all",
+                          "p-3 transition-all border-r border-neutral-700",
                           activeTool === 'perspective' ? "bg-emerald-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-700"
                         )}
                       >
                         <RotateCw size={20} />
                       </button>
                     </Tooltip>
+                    <Tooltip text="Highlight Focus Area">
+                      <button 
+                        onClick={() => setActiveTool('highlight')}
+                        className={cn(
+                          "p-3 transition-all",
+                          activeTool === 'highlight' ? "bg-emerald-600 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-700"
+                        )}
+                      >
+                        <PenTool size={20} />
+                      </button>
+                    </Tooltip>
                   </div>
+
+                  {activeTool === 'highlight' && (
+                    <div className="flex bg-neutral-800 border border-neutral-700 rounded-xl overflow-hidden">
+                      <Tooltip text="Clear Highlight">
+                        <button 
+                          onClick={clearMask}
+                          className="p-3 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-all"
+                        >
+                          <Eraser size={20} />
+                        </button>
+                      </Tooltip>
+                    </div>
+                  )}
 
                   <Tooltip text="Toggle measurement grid (1 unit = 3 ft)">
                     <button 
