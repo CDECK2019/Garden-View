@@ -32,6 +32,7 @@ export interface Project {
   updatedAt: number;
   versions: ProjectVersion[];
   currentVersionId: string;
+  collection?: ImageAngle[];
 }
 
 export interface Template {
@@ -77,6 +78,42 @@ export const LANDSCAPE_TEMPLATES: Template[] = [
       { id: 'med2', name: 'Terracotta Pots (Large)', unit: 'each', unitPrice: 120, quantity: 3 },
       { id: 'med3', name: 'Lavender Plants', unit: 'each', unitPrice: 18, quantity: 12 },
       { id: 'med4', name: 'Olive Tree (Small)', unit: 'each', unitPrice: 250, quantity: 1 },
+    ]
+  },
+  {
+    id: 'zen',
+    name: 'Zen Garden',
+    description: 'Tranquil space with raked gravel, moss, bamboo, and carefully placed stones.',
+    icon: 'Wind',
+    materials: [
+      { id: 'z1', name: 'Fine White Gravel', unit: 'ton', unitPrice: 110, quantity: 3 },
+      { id: 'z2', name: 'Bamboo Fencing', unit: 'linear ft', unitPrice: 18, quantity: 40 },
+      { id: 'z3', name: 'Japanese Maple', unit: 'each', unitPrice: 180, quantity: 1 },
+      { id: 'z4', name: 'Moss Spores', unit: 'sq ft', unitPrice: 5, quantity: 200 },
+    ]
+  },
+  {
+    id: 'cottage',
+    name: 'English Cottage',
+    description: 'Abundant flowers, brick paths, and a charming, informal garden layout.',
+    icon: 'Flower',
+    materials: [
+      { id: 'c1', name: 'Antique Red Bricks', unit: 'each', unitPrice: 1.2, quantity: 500 },
+      { id: 'c2', name: 'Rose Bushes (Climbing)', unit: 'each', unitPrice: 45, quantity: 6 },
+      { id: 'c3', name: 'Wrought Iron Trellis', unit: 'each', unitPrice: 85, quantity: 2 },
+      { id: 'c4', name: 'Hydrangeas', unit: 'each', unitPrice: 32, quantity: 8 },
+    ]
+  },
+  {
+    id: 'desert',
+    name: 'Desert Xeriscape',
+    description: 'Low-maintenance, water-wise design using succulents, cacti, and crushed rock.',
+    icon: 'Mountain',
+    materials: [
+      { id: 'd1', name: 'Crushed Lava Rock', unit: 'ton', unitPrice: 95, quantity: 5 },
+      { id: 'd2', name: 'Agave Plants (Large)', unit: 'each', unitPrice: 75, quantity: 4 },
+      { id: 'd3', name: 'Saguaro Cactus (Medium)', unit: 'each', unitPrice: 350, quantity: 1 },
+      { id: 'd4', name: 'Drip Irrigation Kit', unit: 'each', unitPrice: 150, quantity: 1 },
     ]
   }
 ];

@@ -38,7 +38,16 @@ import {
   Trees,
   Sun,
   PenTool,
-  Eraser
+  Eraser,
+  Undo,
+  Redo,
+  Wind,
+  Flower,
+  Mountain,
+  Palette,
+  Heart,
+  Bookmark,
+  Dices
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from './lib/utils';
@@ -73,15 +82,22 @@ export default function App() {
   const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  
   const [activeIndex, setActiveIndex] = useState(0);
+  
+  const activeProject = projects.find(p => p.id === activeProjectId);
+  const currentVersion = activeProject?.versions.find(v => v.id === activeProject.currentVersionId);
+  const images = currentVersion?.images || [];
+  const currentImage = images[activeIndex]?.url || null;
   const [zoomLevel, setZoomLevel] = useState(1);
   const [showGrid, setShowGrid] = useState(true);
   const [isChatOpen, setIsChatOpen] = useState(true);
+  const [activeSidebarTab, setActiveSidebarTab] = useState<'chat' | 'collection'>('chat');
   const [messages, setMessages] = useState<{ role: 'user' | 'ai'; content: string }[]>([]);
   const [inputMessage, setInputMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const imageRef = useRef<HTMLImageElement>(null);
 
   // Image Manipulation State
   const [activeTool, setActiveTool] = useState<'select' | 'hand' | 'crop' | 'perspective' | 'highlight'>('select');
@@ -95,20 +111,101 @@ export default function App() {
 
   // New Project Modal State
   const [isNewProjectModalOpen, setIsNewProjectModalOpen] = useState(false);
+  const [isStylesMenuOpen, setIsStylesMenuOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   
+  // Undo/Redo History
+  const [history, setHistory] = useState<ProjectVersion[]>([]);
+  const [future, setFuture] = useState<ProjectVersion[]>([]);
+  
+  useEffect(() => {
+    setHistory([]);
+    setFuture([]);
+  }, [activeProjectId, activeProject?.currentVersionId]);
+
+  const pushToHistory = (version: ProjectVersion) => {
+    setHistory(prev => [...prev, JSON.parse(JSON.stringify(version))]);
+    setFuture([]);
+  };
+
+  const undo = () => {
+    if (history.length === 0 || !activeProjectId || !currentVersion) return;
+    
+    const previous = history[history.length - 1];
+    const newHistory = history.slice(0, -1);
+    
+    setFuture(prev => [JSON.parse(JSON.stringify(currentVersion)), ...prev]);
+    setHistory(newHistory);
+    
+    setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+      ...p,
+      versions: p.versions.map(v => v.id === p.currentVersionId ? previous : v)
+    } : p));
+  };
+
+  const redo = () => {
+    if (future.length === 0 || !activeProjectId || !currentVersion) return;
+    
+    const next = future[0];
+    const newFuture = future.slice(1);
+    
+    setHistory(prev => [...prev, JSON.parse(JSON.stringify(currentVersion))]);
+    setFuture(newFuture);
+    
+    setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+      ...p,
+      versions: p.versions.map(v => v.id === p.currentVersionId ? next : v)
+    } : p));
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        redo();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [history, future, currentVersion, activeProjectId]);
+
+  const saveToCollection = () => {
+    if (!activeProjectId || !currentImage) return;
+    
+    const activeProject = projects.find(p => p.id === activeProjectId);
+    if (!activeProject) return;
+
+    const newSavedImage: ImageAngle = {
+      id: Math.random().toString(36).substr(2, 9),
+      url: currentImage,
+      name: `Saved from ${activeProject.name} - ${new Date().toLocaleDateString()}`,
+      timestamp: Date.now()
+    };
+
+    setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+      ...p,
+      collection: [...(p.collection || []), newSavedImage]
+    } : p));
+
+    setMessages(prev => [...prev, { role: 'ai', content: "I've saved this design to your collection. You can view it in the Project Dashboard." }]);
+  };
+
+  const handleVariation = () => {
+    if (!currentImage || isProcessing) return;
+    handleSendMessage("Keep this same general style and layout, but try a different variation of this design. Change some of the specific placements or material textures while maintaining the overall aesthetic.");
+  };
+
   // Cropping State
   const [crop, setCrop] = useState<Point>({ x: 0, y: 0 });
   const [cropZoom, setCropZoom] = useState(1);
   const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
-
-  const activeProject = projects.find(p => p.id === activeProjectId);
-  const currentVersion = activeProject?.versions.find(v => v.id === activeProject.currentVersionId);
-  
-  const images = currentVersion?.images || [];
-  const currentImage = images[activeIndex]?.url || null;
 
   const createProject = (name: string, description: string, templateId?: string | null) => {
     const template = LANDSCAPE_TEMPLATES.find(t => t.id === templateId);
@@ -164,7 +261,8 @@ export default function App() {
       currentVersionId: versionId
     } : p));
     setActiveIndex(0);
-    setZoomLevel(1);
+    setPanOffset({ x: 0, y: 0 });
+    setRotation({ x: 0, y: 0 });
   };
 
   const startDrawingMask = (e: React.MouseEvent | React.TouchEvent) => {
@@ -211,6 +309,7 @@ export default function App() {
     if (!activeProjectId || !currentVersion) return;
     const files = e.target.files;
     if (files) {
+      if (currentVersion) pushToHistory(currentVersion);
       Array.from(files).forEach((file, index) => {
         const reader = new FileReader();
         reader.onload = (event) => {
@@ -238,12 +337,13 @@ export default function App() {
     }
   };
 
-  const handleSendMessage = async () => {
-    if (!inputMessage.trim() || isProcessing || !activeProjectId || !currentVersion) return;
+  const handleSendMessage = async (customMessage?: string) => {
+    const messageToUse = customMessage || inputMessage;
+    if (!messageToUse.trim() || isProcessing || !activeProjectId || !currentVersion) return;
 
-    const userMsg = inputMessage.trim();
+    const userMsg = messageToUse.trim();
     setMessages(prev => [...prev, { role: 'user', content: userMsg }]);
-    setInputMessage('');
+    if (!customMessage) setInputMessage('');
     setIsProcessing(true);
 
     try {
@@ -266,9 +366,10 @@ export default function App() {
           setActiveIndex(0);
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "Here is a design based on your description." }]);
         } else {
-          setMessages(prev => [...prev, { role: 'ai', content: "I couldn't generate a visual for that description. Could you try being more specific about the landscape elements?" }]);
+          setMessages(prev => [...prev, { role: 'ai', content: result.text || "I couldn't generate a visual for that description. Could you try being more specific about the landscape elements?" }]);
         }
       } else {
+        if (currentVersion) pushToHistory(currentVersion);
         const result = await editLandscapeImage(currentImage, userMsg, "image/png", maskImage || undefined);
         if (result.imageUrl) {
           setProjects(prev => prev.map(p => p.id === activeProjectId ? {
@@ -281,7 +382,7 @@ export default function App() {
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "I've updated the design for this angle." }]);
           clearMask();
         } else {
-          setMessages(prev => [...prev, { role: 'ai', content: "I was unable to modify the image. Please try a different request." }]);
+          setMessages(prev => [...prev, { role: 'ai', content: result.text || "I was unable to modify the image. Please try a different request." }]);
         }
       }
     } catch (error) {
@@ -293,6 +394,7 @@ export default function App() {
   };
 
   const updateMaterialQuantity = (id: string, quantity: number) => {
+    if (currentVersion) pushToHistory(currentVersion);
     setProjects(prev => prev.map(p => p.id === activeProjectId ? {
       ...p,
       versions: p.versions.map(v => v.id === p.currentVersionId ? {
@@ -342,6 +444,7 @@ export default function App() {
       
       const croppedImageUrl = canvas.toDataURL('image/jpeg');
       
+      if (currentVersion) pushToHistory(currentVersion);
       setProjects(prev => prev.map(p => p.id === activeProjectId ? {
         ...p,
         versions: p.versions.map(v => v.id === p.currentVersionId ? {
@@ -359,17 +462,38 @@ export default function App() {
   };
 
   const handleZoom = (delta: number) => {
-    setZoomLevel(prev => Math.min(Math.max(prev + delta, 1), 5));
+    setZoomLevel(prev => Math.min(Math.max(prev + delta, 0.1), 5));
   };
+
+  const fitToWindow = useCallback(() => {
+    if (!containerRef.current || !imageRef.current) return;
+    
+    const containerWidth = containerRef.current.clientWidth;
+    const containerHeight = containerRef.current.clientHeight;
+    const imageWidth = imageRef.current.naturalWidth;
+    const imageHeight = imageRef.current.naturalHeight;
+
+    if (imageWidth === 0 || imageHeight === 0) return;
+    
+    const scaleX = (containerWidth - 40) / imageWidth;
+    const scaleY = (containerHeight - 40) / imageHeight;
+    const fitScale = Math.min(scaleX, scaleY);
+    
+    setZoomLevel(fitScale);
+    setPanOffset({ x: 0, y: 0 });
+    setRotation({ x: 0, y: 0 });
+  }, []);
 
   const nextAngle = () => {
     setActiveIndex(prev => (prev + 1) % images.length);
-    setZoomLevel(1);
+    setPanOffset({ x: 0, y: 0 });
+    setRotation({ x: 0, y: 0 });
   };
 
   const prevAngle = () => {
     setActiveIndex(prev => (prev - 1 + images.length) % images.length);
-    setZoomLevel(1);
+    setPanOffset({ x: 0, y: 0 });
+    setRotation({ x: 0, y: 0 });
   };
 
   return (
@@ -496,7 +620,12 @@ export default function App() {
                           <label className="block text-xs font-bold text-neutral-500 uppercase tracking-widest mb-4">Select a Design Template (Optional)</label>
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                             {LANDSCAPE_TEMPLATES.map(template => {
-                              const Icon = template.id === 'modern' ? Layout : template.id === 'rustic' ? Trees : Sun;
+                              const Icon = 
+                                template.id === 'modern' ? Layout : 
+                                template.id === 'rustic' ? Trees : 
+                                template.id === 'zen' ? Wind :
+                                template.id === 'cottage' ? Flower :
+                                template.id === 'desert' ? Mountain : Sun;
                               return (
                                 <button
                                   key={template.id}
@@ -593,6 +722,76 @@ export default function App() {
                   ))}
                 </div>
               )}
+
+              {/* Saved Collection Section */}
+              {projects.some(p => p.collection && p.collection.length > 0) && (
+                <div className="space-y-6 pt-12 border-t border-neutral-900">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="text-2xl font-bold mb-1 flex items-center gap-2">
+                        <Bookmark className="text-emerald-500" size={24} />
+                        Saved Collection
+                      </h3>
+                      <p className="text-neutral-400">Your favorite design iterations across all projects.</p>
+                    </div>
+                  </div>
+                  
+                  <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
+                    {projects.flatMap(p => (p.collection || []).map(img => ({ ...img, projectName: p.name, projectId: p.id }))).sort((a, b) => b.timestamp - a.timestamp).map(savedImg => (
+                      <div 
+                        key={savedImg.id}
+                        className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden group relative aspect-[4/3]"
+                      >
+                        <img 
+                          src={savedImg.url} 
+                          className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+                          alt={savedImg.name}
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
+                          <p className="text-[10px] font-bold text-white mb-1 line-clamp-1">{savedImg.projectName}</p>
+                          <p className="text-[8px] text-neutral-400 mb-3">{new Date(savedImg.timestamp).toLocaleDateString()}</p>
+                          <div className="flex gap-2">
+                            <button 
+                              onClick={() => {
+                                setActiveProjectId(savedImg.projectId);
+                                setViewMode('design');
+                                // We can't easily trigger variation from here because state needs to update
+                                // But we can set a flag or just let the user do it from the design view
+                              }}
+                              className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[9px] font-bold py-1.5 rounded-lg transition-all"
+                            >
+                              Open Project
+                            </button>
+                            <button 
+                              onClick={() => {
+                                setActiveProjectId(savedImg.projectId);
+                                setViewMode('design');
+                                // This is a bit hacky but works for the demo
+                                setTimeout(() => handleVariation(), 500);
+                              }}
+                              className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-emerald-400 rounded-lg transition-all"
+                              title="Try Variation"
+                            >
+                              <Dices size={12} />
+                            </button>
+                            <button 
+                              onClick={() => {
+                                const link = document.createElement('a');
+                                link.href = savedImg.url;
+                                link.download = `design-${savedImg.id}.png`;
+                                link.click();
+                              }}
+                              className="p-1.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg transition-all"
+                            >
+                              <Download size={12} />
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         ) : viewMode === 'design' ? (
@@ -626,6 +825,29 @@ export default function App() {
                       <Save size={12} /> Save Current
                     </button>
                   </Tooltip>
+
+                  <div className="h-4 w-px bg-neutral-800 mx-2" />
+                  
+                  <div className="flex items-center gap-1">
+                    <Tooltip text="Undo (Ctrl+Z)">
+                      <button 
+                        onClick={undo}
+                        disabled={history.length === 0}
+                        className="p-1.5 rounded hover:bg-neutral-800 text-neutral-400 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                      >
+                        <Undo size={16} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip text="Redo (Ctrl+Y)">
+                      <button 
+                        onClick={redo}
+                        disabled={future.length === 0}
+                        className="p-1.5 rounded hover:bg-neutral-800 text-neutral-400 hover:text-white disabled:opacity-30 disabled:hover:bg-transparent transition-all"
+                      >
+                        <Redo size={16} />
+                      </button>
+                    </Tooltip>
+                  </div>
                 </div>
                 <div className="text-[10px] font-mono text-neutral-500">
                   PROJECT: {activeProject?.name.toUpperCase()}
@@ -671,14 +893,9 @@ export default function App() {
                     ) : (
                       <div className="relative w-full h-full max-w-6xl max-h-full flex items-center justify-center">
                         <div 
-                          className="relative shadow-2xl rounded-2xl border border-neutral-700 bg-neutral-800 overflow-hidden flex items-center justify-center" 
-                          style={{ 
-                            perspective: '1200px',
-                            width: 'fit-content',
-                            height: 'fit-content',
-                            maxWidth: '100%',
-                            maxHeight: '100%'
-                          }}
+                          ref={containerRef}
+                          className="relative w-full h-full shadow-2xl rounded-2xl border border-neutral-700 bg-neutral-800 overflow-hidden flex items-center justify-center" 
+                          style={{ perspective: '1200px' }}
                         >
                           <motion.div
                             drag={activeTool === 'hand'}
@@ -711,18 +928,20 @@ export default function App() {
                             )}
                           >
                             <img 
+                              ref={imageRef}
                               key={currentImage}
                               src={currentImage} 
                               alt="Landscape View" 
-                              className="max-w-full max-h-full object-contain pointer-events-none shadow-2xl"
+                              className="pointer-events-none shadow-2xl"
                               referrerPolicy="no-referrer"
                               onLoad={(e) => {
                                 console.log('Image loaded successfully');
+                                const img = e.target as HTMLImageElement;
                                 if (maskCanvasRef.current) {
-                                  const img = e.target as HTMLImageElement;
                                   maskCanvasRef.current.width = img.naturalWidth;
                                   maskCanvasRef.current.height = img.naturalHeight;
                                 }
+                                fitToWindow();
                               }}
                               onError={(e) => {
                                 console.error('Image failed to load');
@@ -957,6 +1176,100 @@ export default function App() {
                       <span className="text-xs font-bold uppercase tracking-wider">Grid</span>
                     </button>
                   </Tooltip>
+
+                  <div className="relative">
+                    <Tooltip text="Apply Style Template">
+                      <button 
+                        onClick={() => setIsStylesMenuOpen(!isStylesMenuOpen)}
+                        className={cn(
+                          "p-3 rounded-xl border transition-all flex items-center gap-2",
+                          isStylesMenuOpen 
+                            ? "bg-emerald-600 border-emerald-500 text-white shadow-lg shadow-emerald-900/20" 
+                            : "bg-neutral-800 border-neutral-700 text-neutral-400 hover:bg-neutral-700"
+                        )}
+                      >
+                        <Palette size={20} />
+                        <span className="text-xs font-bold uppercase tracking-wider">Styles</span>
+                      </button>
+                    </Tooltip>
+
+                    <Tooltip text="Save to Collection">
+                      <button 
+                        onClick={saveToCollection}
+                        className="p-3 rounded-xl border bg-neutral-800 border-neutral-700 text-neutral-400 hover:bg-neutral-700 hover:text-emerald-400 transition-all flex items-center gap-2"
+                      >
+                        <Heart size={20} />
+                        <span className="text-xs font-bold uppercase tracking-wider">Save</span>
+                      </button>
+                    </Tooltip>
+
+                    <Tooltip text="Try Different Variation">
+                      <button 
+                        onClick={handleVariation}
+                        disabled={isProcessing}
+                        className="p-3 rounded-xl border bg-neutral-800 border-neutral-700 text-neutral-400 hover:bg-neutral-700 hover:text-emerald-400 transition-all flex items-center gap-2 disabled:opacity-50"
+                      >
+                        <Dices size={20} />
+                        <span className="text-xs font-bold uppercase tracking-wider">Variation</span>
+                      </button>
+                    </Tooltip>
+
+                    <AnimatePresence>
+                      {isStylesMenuOpen && (
+                        <motion.div
+                          initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                          className="absolute bottom-full mb-4 left-0 bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl p-4 w-72 z-[100]"
+                        >
+                          <div className="flex items-center justify-between mb-3 pb-2 border-b border-neutral-800">
+                            <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-widest">Select Style</h4>
+                            <button onClick={() => setIsStylesMenuOpen(false)} className="text-neutral-500 hover:text-white">
+                              <X size={14} />
+                            </button>
+                          </div>
+                          
+                          <button 
+                            onClick={() => {
+                              handleVariation();
+                              setIsStylesMenuOpen(false);
+                            }}
+                            disabled={isProcessing}
+                            className="w-full mb-3 p-3 rounded-xl bg-emerald-600/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-600/20 transition-all flex items-center justify-center gap-2 group disabled:opacity-50"
+                          >
+                            <Dices size={18} className="group-hover:rotate-12 transition-transform" />
+                            <span className="text-xs font-bold uppercase tracking-wider">Shuffle Variation</span>
+                          </button>
+
+                          <div className="grid grid-cols-2 gap-2">
+                            {LANDSCAPE_TEMPLATES.map(template => {
+                              const Icon = 
+                                template.id === 'modern' ? Layout : 
+                                template.id === 'rustic' ? Trees : 
+                                template.id === 'zen' ? Wind :
+                                template.id === 'cottage' ? Flower :
+                                template.id === 'desert' ? Mountain : Sun;
+                              return (
+                                <button
+                                  key={template.id}
+                                  onClick={() => {
+                                    handleSendMessage(`Apply the ${template.name} style to this image. ${template.description}`);
+                                    setIsStylesMenuOpen(false);
+                                  }}
+                                  className="flex flex-col items-center gap-2 p-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 transition-all group"
+                                >
+                                  <div className="w-8 h-8 rounded-lg bg-neutral-900 flex items-center justify-center text-neutral-400 group-hover:text-emerald-400 transition-colors">
+                                    <Icon size={16} />
+                                  </div>
+                                  <span className="text-[10px] font-bold text-center leading-tight">{template.name}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
                   
                   {currentImage && (
                     <>
@@ -969,13 +1282,9 @@ export default function App() {
                             <ZoomOut size={20} />
                           </button>
                         </Tooltip>
-                        <Tooltip text="Reset View">
+                        <Tooltip text="Fit to Window">
                           <button 
-                            onClick={() => {
-                              setZoomLevel(1);
-                              setPanOffset({ x: 0, y: 0 });
-                              setRotation({ x: 0, y: 0 });
-                            }}
+                            onClick={fitToWindow}
                             className="p-3 text-neutral-400 hover:text-white hover:bg-neutral-700 transition-all border-r border-neutral-700"
                           >
                             <Maximize size={20} />
@@ -995,6 +1304,7 @@ export default function App() {
                         <button 
                           onClick={() => {
                             if (!activeProjectId || !currentVersion) return;
+                            pushToHistory(currentVersion);
                             const newImages = images.filter((_, i) => i !== activeIndex);
                             setProjects(prev => prev.map(p => p.id === activeProjectId ? {
                               ...p,
@@ -1034,7 +1344,8 @@ export default function App() {
                       key={img.id}
                       onClick={() => {
                         setActiveIndex(i);
-                        setZoomLevel(1);
+                        setPanOffset({ x: 0, y: 0 });
+                        setRotation({ x: 0, y: 0 });
                       }}
                       className={cn(
                         "flex-shrink-0 w-24 h-16 rounded-lg overflow-hidden border-2 transition-all relative group",
@@ -1076,7 +1387,35 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-neutral-800">
+                <div className="flex border-b border-neutral-800">
+                  <button 
+                    onClick={() => setActiveSidebarTab('chat')}
+                    className={cn(
+                      "flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all",
+                      activeSidebarTab === 'chat' ? "text-emerald-500 border-b-2 border-emerald-500" : "text-neutral-500 hover:text-neutral-300"
+                    )}
+                  >
+                    Chat
+                  </button>
+                  <button 
+                    onClick={() => setActiveSidebarTab('collection')}
+                    className={cn(
+                      "flex-1 py-3 text-xs font-bold uppercase tracking-widest transition-all flex items-center justify-center gap-2",
+                      activeSidebarTab === 'collection' ? "text-emerald-500 border-b-2 border-emerald-500" : "text-neutral-500 hover:text-neutral-300"
+                    )}
+                  >
+                    Collection
+                    {activeProject?.collection && activeProject.collection.length > 0 && (
+                      <span className="bg-emerald-500 text-black text-[8px] px-1.5 py-0.5 rounded-full">
+                        {activeProject.collection.length}
+                      </span>
+                    )}
+                  </button>
+                </div>
+
+                {activeSidebarTab === 'chat' ? (
+                  <>
+                    <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-neutral-800">
                   {messages.length === 0 && (
                     <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-50">
                       <MessageSquare size={48} className="mb-4 text-neutral-700" />
@@ -1098,6 +1437,18 @@ export default function App() {
                           {msg.content}
                         </Markdown>
                       </div>
+                      {msg.role === 'ai' && i > 0 && (
+                        <div className="mt-3 pt-3 border-t border-neutral-700/50 flex justify-end">
+                          <button 
+                            onClick={handleVariation}
+                            disabled={isProcessing}
+                            className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-neutral-900/50 text-[10px] font-bold text-emerald-500 hover:bg-neutral-900 transition-all disabled:opacity-50"
+                          >
+                            <Dices size={12} />
+                            Try Variation
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                   {isProcessing && (
@@ -1129,7 +1480,7 @@ export default function App() {
                     <div className="absolute bottom-3 right-3">
                       <Tooltip text="Send message to AI assistant">
                         <button 
-                          onClick={handleSendMessage}
+                          onClick={() => handleSendMessage()}
                           disabled={!inputMessage.trim() || isProcessing}
                           className="p-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-50 disabled:opacity-50 disabled:hover:bg-emerald-600 transition-all"
                         >
@@ -1142,8 +1493,98 @@ export default function App() {
                     AI can make mistakes. Verify important measurements.
                   </p>
                 </div>
+              </>
+            ) : (
+              <div className="flex-1 flex flex-col overflow-hidden">
+                <div className="flex-1 overflow-y-auto p-4 space-y-4 scrollbar-thin scrollbar-thumb-neutral-800">
+                  {(!activeProject?.collection || activeProject.collection.length === 0) ? (
+                    <div className="h-full flex flex-col items-center justify-center text-center p-8 opacity-50">
+                      <Bookmark size={48} className="mb-4 text-neutral-700" />
+                      <p className="text-sm">Your collection is empty. Save generated photos to keep them as distinct versions.</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 gap-4">
+                      {activeProject.collection.map((savedImg) => (
+                        <div 
+                          key={savedImg.id}
+                          className="bg-neutral-800 border border-neutral-700 rounded-2xl overflow-hidden group relative aspect-video"
+                        >
+                          <img 
+                            src={savedImg.url} 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                            alt={savedImg.name}
+                          />
+                          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity p-4 flex flex-col justify-end">
+                            <p className="text-[10px] font-bold text-white mb-1">{new Date(savedImg.timestamp).toLocaleString()}</p>
+                            <div className="flex gap-2">
+                              <button 
+                                onClick={() => {
+                                  if (!activeProjectId || !currentVersion) return;
+                                  pushToHistory(currentVersion);
+                                  const newImages = [...images];
+                                  newImages[activeIndex] = { ...newImages[activeIndex], url: savedImg.url };
+                                  setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+                                    ...p,
+                                    versions: p.versions.map(v => v.id === p.currentVersionId ? {
+                                      ...v,
+                                      images: newImages
+                                    } : v)
+                                  } : p));
+                                  setMessages(prev => [...prev, { role: 'ai', content: "I've restored this version from your collection. You can continue refining it from here." }]);
+                                }}
+                                className="flex-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[10px] font-bold py-2 rounded-lg transition-all flex items-center justify-center gap-2"
+                              >
+                                <RefreshCw size={14} />
+                                Restore to Canvas
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  // First restore it, then trigger variation
+                                  if (!activeProjectId || !currentVersion) return;
+                                  pushToHistory(currentVersion);
+                                  const newImages = [...images];
+                                  newImages[activeIndex] = { ...newImages[activeIndex], url: savedImg.url };
+                                  setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+                                    ...p,
+                                    versions: p.versions.map(v => v.id === p.currentVersionId ? {
+                                      ...v,
+                                      images: newImages
+                                    } : v)
+                                  } : p));
+                                  handleVariation();
+                                }}
+                                className="p-2 bg-neutral-800 hover:bg-neutral-700 text-emerald-400 rounded-lg transition-all"
+                                title="Try Variation of this version"
+                              >
+                                <Dices size={14} />
+                              </button>
+                              <button 
+                                onClick={() => {
+                                  setProjects(prev => prev.map(p => p.id === activeProjectId ? {
+                                    ...p,
+                                    collection: p.collection?.filter(img => img.id !== savedImg.id)
+                                  } : p));
+                                }}
+                                className="p-2 bg-red-900/50 hover:bg-red-900 text-white rounded-lg transition-all"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                <div className="p-4 border-t border-neutral-800 bg-neutral-900/80">
+                  <p className="text-[10px] text-neutral-500 text-center">
+                    Saved versions are snapshots of your design at a specific point in time.
+                  </p>
+                </div>
               </div>
-            </motion.aside>
+            )}
+          </div>
+        </motion.aside>
           </>
         ) : (
           /* Business View */
@@ -1236,6 +1677,7 @@ export default function App() {
                             value={currentVersion?.laborRate || 0}
                             onChange={(e) => {
                               const val = parseFloat(e.target.value) || 0;
+                              if (currentVersion) pushToHistory(currentVersion);
                               setProjects(prev => prev.map(p => p.id === activeProjectId ? {
                                 ...p,
                                 versions: p.versions.map(v => v.id === p.currentVersionId ? { ...v, laborRate: val } : v)
@@ -1252,6 +1694,7 @@ export default function App() {
                           value={currentVersion?.laborHours || 0}
                           onChange={(e) => {
                             const val = parseFloat(e.target.value) || 0;
+                            if (currentVersion) pushToHistory(currentVersion);
                             setProjects(prev => prev.map(p => p.id === activeProjectId ? {
                               ...p,
                               versions: p.versions.map(v => v.id === p.currentVersionId ? { ...v, laborHours: val } : v)
