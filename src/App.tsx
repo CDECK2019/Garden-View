@@ -124,8 +124,26 @@ export default function App() {
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [activeTemplateCategory, setActiveTemplateCategory] = useState<'landscape' | 'interior'>('landscape');
-  
-  // Undo/Redo History
+  const [hasSelectedKey, setHasSelectedKey] = useState(false);
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+
+  useEffect(() => {
+    const checkKey = async () => {
+      if (window.aistudio?.hasSelectedApiKey) {
+        const hasKey = await window.aistudio.hasSelectedApiKey();
+        setHasSelectedKey(hasKey);
+      }
+    };
+    checkKey();
+  }, []);
+
+  const handleSelectKey = async () => {
+    if (window.aistudio?.openSelectKey) {
+      await window.aistudio.openSelectKey();
+      setHasSelectedKey(true);
+      setShowQuotaModal(false);
+    }
+  };
   const [history, setHistory] = useState<ProjectVersion[]>([]);
   const [future, setFuture] = useState<ProjectVersion[]>([]);
   
@@ -375,7 +393,12 @@ export default function App() {
           setActiveIndex(0);
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "Here is a design based on your description." }]);
         } else {
-          setMessages(prev => [...prev, { role: 'ai', content: result.text || "I couldn't generate a visual for that description. Could you try being more specific about the design elements?" }]);
+          if (result.errorType === 'quota') {
+            setShowQuotaModal(true);
+            setMessages(prev => [...prev, { role: 'ai', content: "It looks like the shared API quota has been reached. Since you're on a paid plan, please select your own API key to continue with unlimited access." }]);
+          } else {
+            setMessages(prev => [...prev, { role: 'ai', content: result.text || "I couldn't generate a visual for that description. Could you try being more specific about the design elements?" }]);
+          }
         }
       } else {
         if (currentVersion) pushToHistory(currentVersion);
@@ -391,7 +414,12 @@ export default function App() {
           setMessages(prev => [...prev, { role: 'ai', content: result.text || "I've updated the design for this angle." }]);
           clearMask();
         } else {
-          setMessages(prev => [...prev, { role: 'ai', content: result.text || "I was unable to modify the image. Please try a different request." }]);
+          if (result.errorType === 'quota') {
+            setShowQuotaModal(true);
+            setMessages(prev => [...prev, { role: 'ai', content: "It looks like the shared API quota has been reached. Since you're on a paid plan, please select your own API key to continue with unlimited access." }]);
+          } else {
+            setMessages(prev => [...prev, { role: 'ai', content: result.text || "I was unable to modify the image. Please try a different request." }]);
+          }
         }
       }
     } catch (error) {
@@ -555,6 +583,15 @@ export default function App() {
         </nav>
 
         <div className="flex items-center gap-4">
+          {!hasSelectedKey && (
+            <button 
+              onClick={handleSelectKey}
+              className="hidden lg:flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-lg text-xs font-bold hover:bg-amber-500/20 transition-all"
+            >
+              <Gem size={14} />
+              Use Paid API Key
+            </button>
+          )}
           <div className="hidden md:flex flex-col items-end">
             <span className="text-xs text-neutral-500 uppercase font-mono">Project Total</span>
             <span className="text-lg font-bold text-emerald-400">${calculateTotal().toLocaleString()}</span>
@@ -1846,6 +1883,57 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* Quota Modal */}
+      <AnimatePresence>
+        {showQuotaModal && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="bg-neutral-900 border border-neutral-800 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl"
+            >
+              <div className="p-8 text-center">
+                <div className="w-16 h-16 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-amber-500/20">
+                  <Gem className="text-amber-500 w-8 h-8" />
+                </div>
+                <h3 className="text-2xl font-bold mb-3">API Quota Reached</h3>
+                <p className="text-neutral-400 mb-8 leading-relaxed">
+                  The shared API quota for this preview has been reached. Since you have a paid plan, you can continue by selecting your own API key.
+                </p>
+                <div className="space-y-3">
+                  <button 
+                    onClick={handleSelectKey}
+                    className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 px-6 rounded-2xl transition-all shadow-lg shadow-emerald-900/20 flex items-center justify-center gap-2"
+                  >
+                    <Gem size={20} />
+                    Select My API Key
+                  </button>
+                  <button 
+                    onClick={() => setShowQuotaModal(false)}
+                    className="w-full bg-neutral-800 hover:bg-neutral-700 text-neutral-400 font-bold py-4 px-6 rounded-2xl transition-all"
+                  >
+                    Maybe Later
+                  </button>
+                </div>
+                <p className="mt-6 text-[10px] text-neutral-500 uppercase tracking-widest font-mono">
+                  Unlimited access with your own key
+                </p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <input 
+        type="file" 
+        ref={fileInputRef} 
+        onChange={handleFileUpload} 
+        className="hidden" 
+        accept="image/*"
+        multiple
+      />
     </div>
   );
 }

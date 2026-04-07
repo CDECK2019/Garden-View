@@ -1,9 +1,10 @@
 import { GoogleGenAI, GenerateContentResponse } from "@google/genai";
 
 // The API key is injected by the platform into process.env.GEMINI_API_KEY
-const apiKey = process.env.GEMINI_API_KEY || "";
+// If the user selects their own key, it's in process.env.API_KEY
+const getApiKey = () => process.env.API_KEY || process.env.GEMINI_API_KEY || "";
 
-export const MODEL_NAME = "gemini-2.5-flash-image";
+export const MODEL_NAME = "gemini-3.1-flash-image-preview";
 
 async function resizeImage(base64: string, maxDimension: number = 1024): Promise<string> {
   return new Promise((resolve) => {
@@ -46,8 +47,8 @@ export async function editLandscapeImage(
   prompt: string,
   mimeType: string = "image/png",
   maskImage?: string
-): Promise<{ imageUrl: string; text?: string }> {
-  const apiKey = process.env.GEMINI_API_KEY || "";
+): Promise<{ imageUrl: string; text?: string; errorType?: 'quota' | 'other' }> {
+  const apiKey = getApiKey();
   if (!apiKey) {
     console.error("GEMINI_API_KEY is missing");
     return { imageUrl: "", text: "Error: API key is missing. Please check your configuration." };
@@ -131,12 +132,18 @@ export async function editLandscapeImage(
     return { imageUrl, text };
   } catch (error) {
     console.error("Error in editLandscapeImage API call:", error);
-    return { imageUrl: "", text: `An error occurred: ${error instanceof Error ? error.message : String(error)}` };
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isQuotaError = errorMessage.toLowerCase().includes("quota") || errorMessage.toLowerCase().includes("429");
+    return { 
+      imageUrl: "", 
+      text: `An error occurred: ${errorMessage}`,
+      errorType: isQuotaError ? 'quota' : 'other'
+    };
   }
 }
 
-export async function generateInitialLandscape(prompt: string): Promise<{ imageUrl: string; text?: string }> {
-  const apiKey = process.env.GEMINI_API_KEY || "";
+export async function generateInitialLandscape(prompt: string): Promise<{ imageUrl: string; text?: string; errorType?: 'quota' | 'other' }> {
+  const apiKey = getApiKey();
   if (!apiKey) {
     console.error("GEMINI_API_KEY is missing");
     return { imageUrl: "", text: "Error: API key is missing. Please check your configuration." };
@@ -186,6 +193,12 @@ export async function generateInitialLandscape(prompt: string): Promise<{ imageU
     return { imageUrl, text };
   } catch (error) {
     console.error("Error in generateInitialLandscape API call:", error);
-    return { imageUrl: "", text: `An error occurred: ${error instanceof Error ? error.message : String(error)}` };
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isQuotaError = errorMessage.toLowerCase().includes("quota") || errorMessage.toLowerCase().includes("429");
+    return { 
+      imageUrl: "", 
+      text: `An error occurred: ${errorMessage}`,
+      errorType: isQuotaError ? 'quota' : 'other'
+    };
   }
 }

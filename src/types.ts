@@ -44,6 +44,15 @@ export interface Template {
   category: 'landscape' | 'interior';
 }
 
+declare global {
+  interface Window {
+    aistudio?: {
+      hasSelectedApiKey: () => Promise<boolean>;
+      openSelectKey: () => Promise<void>;
+    };
+  }
+}
+
 export const DESIGN_TEMPLATES: Template[] = [
   // Landscape Templates
   {
